@@ -1,0 +1,37 @@
+一：后台获取并且判断是否禁用cookie
+    Cookie[] cookies = request.getCookies();
+    for (Cookie cookie : cookies){
+        if (cookie.getName().equals("JSESSIONID")){
+            logger.info("cookie传过来的值为:"+cookie.getValue());
+        }
+    }
+    拓展：如果被禁用，只能使用url path的方法去携带sessionId,在后台session的setAttribute()方法后面首先
+    获取此时的sessionId然后丢到session中，用redirect是直接把参数用？JSESSIONID=session.getId()出去前台
+    ，此时浏览器会携带该参数，然后后台会自动进行判断
+
+    重点：分布式系统的session一致性的实现：
+    在后台创建RedisSessionConfig 类，通过redis存放session的信息来达到session分布式的一致性要求。代码如
+    下：
+
+/**
+ * redis session 配置策略（cookie和header），默认cookie
+ * 作用：开启session-redis
+ *
+ */
+@Configuration
+@EnableRedisHttpSession(maxInactiveIntervalInSeconds = 1800, redisNamespace = "session-map")
+public class RedisSessionConfig {
+
+    //使用了下面配置后，每次获取session都是新的session，导致session不一致（推测可能受了前台cookie的影响）
+    //如果该配置不要，则会产生一个问题：服务器会生成一个session存在cookie中，开始正常，之后会生成
+    //jsessionID，此时如果在被session拦截器拦截，此时获取的
+    //session id 为jsesssionId的value，说明了以前session登录判断都是通过jsessionId来进行判断是否登录的
+    @Bean
+    public HttpSessionStrategy httpSessionStrategy() {
+            return new CookieHttpSessionStrategy();
+         /*  return new HeaderHttpSessionStrategy();*/
+    }
+}
+    在这里使用的是cookieHttpSessionStrategy() 策略，就是当前台可以使用cookie时，cookie和session联合
+    使用，跟踪用户信息，和普通的会话保持机制一样。用HeaderHttpSessionStrategy() 在这里不成功，猜测应该
+    是没有自定义url加上jsessionId导致的

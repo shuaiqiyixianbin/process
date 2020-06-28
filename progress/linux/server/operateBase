@@ -1,0 +1,49 @@
+Linux操作手册
+    一：日志
+        1.1：根据关键字搜索日志：
+            grep 关键字 xx.log --color auto
+
+        1.2：shift G ---->到达最底层数据
+
+    二：linux服务方面
+        2.1：telnet ip 9092
+
+        2.2：全局搜索关键字
+             find . -name  "zookeeper"
+             模糊匹配：
+             find . -name "*zookeeper*"   类似于mysql的模糊匹配
+
+        2.3：本地文件复制
+            cp /home/yxbjll/zookeeper.3.4.12.tar.gz   /home/zk  表示从 /home/yxbjll 路径下复制 zk 到 /home/zk 路径下
+
+            远程文件拷贝复制
+            scp
+        2.4：剪切ji
+            mv name newName  如果是同一路径下，mv为改名
+            mv name /路径    为剪切
+
+        2.5：解压 tar.gz 文件
+            tar -xzvf file.tar.gz
+
+
+    三：线上问题定位
+        3.1：jstack检测cpu高使用率
+            步骤一：查看cpu占用高进程
+                3.1.1: top -->可以查看所有 pid(进程) 对应的 cpu 使用率
+
+            步骤二：查看cpu占用高线程(步骤一已经找出进程号，通过此进程号，找到改进程里耗cpu的线程)
+                3.1.2：top -H -p 17850
+
+            步骤三：转换线程ID (将具体的摸一个)
+                printf "%x\n" 17880
+                45d8
+
+            步骤四：定位cpu占用线程
+                jstack 17850|grep 45d8 -A 30
+
+
+
+
+
+
+

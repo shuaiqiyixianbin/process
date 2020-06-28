@@ -1,0 +1,15 @@
+springboot整合webSocket知识
+1.https://blog.csdn.net/qq_28988969/article/details/78113463     //有关于STOMP协议介绍
+
+2.https://blog.csdn.net/jqsad/article/details/77745379 　　　　　　　　　　//描述stomp的api使用
+
+3.配置详解
+https://www.cnblogs.com/mr-wuxiansheng/p/7103567.html
+
+4.https://blog.csdn.net/qq_28988969/article/details/78134114?locationNum=9&fps=1   //获取包含在stomp中的用户信息 可以获取到对应的详细人
+
+5.https://blog.csdn.net/liu_c_y/article/details/51782395　　//关于session的处理
+
+6.https://blog.csdn.net/zhangdehua678/article/details/78913839 //也非常详细
+
+7.https://www.cnblogs.com/best/archive/2016/09/12/5695570.html  //各种资源

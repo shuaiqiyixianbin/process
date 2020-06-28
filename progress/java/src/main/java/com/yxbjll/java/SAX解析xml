@@ -1,0 +1,204 @@
+SAX对xml文件的解析
+
+package com.fortune;
+
+import org.xml.sax.SAXException;
+
+import javax.xml.parsers.ParserConfigurationException;
+import javax.xml.parsers.SAXParser;
+import javax.xml.parsers.SAXParserFactory;
+import java.io.FileInputStream;
+import java.io.IOException;
+import java.io.InputStream;
+import java.util.ArrayList;
+import java.util.List;
+
+public class SaxParser implements xmlParse{
+    @Override
+    public List<Book> parseXml(String fileName) throws IOException, SAXException, ParserConfigurationException {
+        List<Book> list = new ArrayList<Book>();
+        SAXParserFactory factory = SAXParserFactory.newInstance();//解析器工厂实例
+        MySaxHandler handler = null;
+        SAXParser parser = factory.newSAXParser();
+        InputStream inputStream = new FileInputStream(fileName);
+        handler = new MySaxHandler();
+        parser.parse(inputStream,handler);
+        list = handler.getBookList();
+        return list;
+    }
+
+    public static void main(String[] args) throws IOException, SAXException, ParserConfigurationException {
+        xmlParse parse = new SaxParser();
+        List<Book> list = parse.parseXml("E:\\Alive\\project\\src\\com\\fortune\\book.xml");
+        System.out.println("SAX 解析结果:");
+        for (Book book : list){
+            System.out.println(book);
+        }
+    }
+}
+
+
+package com.fortune;
+
+import org.xml.sax.Attributes;
+import org.xml.sax.SAXException;
+import org.xml.sax.helpers.DefaultHandler;
+
+import java.util.ArrayList;
+import java.util.List;
+
+/**
+ * 事件处理器
+ */
+public class MySaxHandler extends DefaultHandler {
+    private String tag;
+    private Book book;
+    private List<Book> bookList;
+
+    public List<Book> getBookList() {
+        return bookList;
+    }
+
+    //文档读取开始
+    public void startDocument() throws SAXException {
+        super.startDocument();
+        bookList = new ArrayList<Book>();
+
+    }
+
+    //文档读取结束
+    public void endDocument() throws SAXException {
+        super.endDocument();
+
+    }
+
+    //元素读取开始
+    public void startElement(String uri, String localName, String qName, Attributes attributes) throws SAXException {
+        super.startElement(uri, localName, qName, attributes);
+        if(qName.equals("book")){
+            book = new Book();
+            String bookNo = attributes.getValue("bookno");
+            book.setBookNo(bookNo);
+        }
+        tag = qName;
+    }
+
+
+    //元素读取结束
+    public void endElement(String uri, String localName, String qName) throws SAXException {
+        super.endElement(uri, localName, qName);
+        if(qName.equals("book")){//如果读到结尾，证明元素都已经读取完毕
+            bookList.add(book);
+            book = null;//初始化，为下一本书
+        }
+        tag = null;
+    }
+
+
+    //character内容读取
+    public void characters(char[] ch, int start, int length) throws SAXException {
+        super.characters(ch, start, length);
+        if(tag!=null){//读取到所需的信息
+            String string = new String(ch,start,length).trim();//从头到尾读取完，ch应该是内容数组
+            if(tag.equals("title")){
+                book.setTitle(string);
+            }
+            if(tag.equals("author")){
+                book.setAuthor(string);
+            }
+            if(tag.equals("price")){
+                book.setPrice(Double.parseDouble(string));
+            }
+        }
+    }
+
+}
+package com.fortune;
+
+import org.xml.sax.SAXException;
+
+import javax.xml.parsers.ParserConfigurationException;
+import java.io.IOException;
+import java.util.List;
+
+public interface xmlParse {
+    public List<Book> parseXml(String fileName) throws IOException, SAXException, ParserConfigurationException;
+
+}
+
+
+
+package com.fortune;
+
+public class Book {
+    private String bookNo;
+    private String title;
+    private String author;
+    private double price;
+
+    public Book() {
+    }
+
+    public Book(String bookNo, String title, String author, double price) {
+        this.bookNo = bookNo;
+        this.title = title;
+        this.author = author;
+        this.price = price;
+    }
+
+    public String getBookNo() {
+        return bookNo;
+    }
+
+    public void setBookNo(String bookNo) {
+        this.bookNo = bookNo;
+    }
+
+    public String getTitle() {
+        return title;
+    }
+
+    public void setTitle(String title) {
+        this.title = title;
+    }
+
+    public String getAuthor() {
+        return author;
+    }
+
+    public void setAuthor(String author) {
+        this.author = author;
+    }
+
+    public double getPrice() {
+        return price;
+    }
+
+    public void setPrice(double price) {
+        this.price = price;
+    }
+
+    @Override
+    public String toString() {
+        return "Book{" +
+                "bookNo='" + bookNo + '\'' +
+                ", title='" + title + '\'' +
+                ", author='" + author + '\'' +
+                ", price=" + price +
+                '}';
+    }
+}
+xml文件
+<?xml version="1.0" encoding="utf-8" ?>
+<books>
+    <book bookno="001">
+        <title>java编程</title>
+        <author>张三</author>
+        <price>80</price>
+    </book>
+    <book bookno="002">
+        <title>安卓开发</title>
+        <author>李四</author>
+        <price>100</price>
+    </book>
+</books>

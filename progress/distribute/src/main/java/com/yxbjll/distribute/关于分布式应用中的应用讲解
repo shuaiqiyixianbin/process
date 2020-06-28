@@ -1,0 +1,4 @@
+一：获取当前正在运行的 Java 虚拟机等信息    详见【ServerInfo.java】
+    1.1: PID
+        当前服务运行在 JVM上的进程 id
+

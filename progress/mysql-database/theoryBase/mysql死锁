@@ -1,0 +1,101 @@
+死锁概念：
+    死锁是指两个或多个事务在同一资源上相互占用，并请求锁定对方占用的资源。从而产生恶性循环。当多个事务以
+    不同的顺序锁定资源时，就可能会产生死锁。多个事务同时锁定同一个资源时，也会产生死锁。
+    如：
+    事务1：
+    update stockPrice set price=45.5 where stock_id=3;
+    update stockPrice set price=19.8 where stock_id=4;
+
+    事务2：
+     update stockPrice set price=21.8 where stock_id=4;
+     update stockPrice set price=66.3 where stock_id=3;
+
+     如果两个事务都执行了第一条update语句，此时肯定都锁定了该行数据。接着每个事务都尝试去执行第二条数据
+     。发现该行已经被对方锁定，然后两个事务都等待对方释放锁，同时又持有对方需要的锁，此时就会陷入死循环，
+     需要外部因素介入，解除死锁状态
+
+     原因：
+         innodb中会使用行锁来提高并发，当都执行了一条sql时，一个获取了id=4的锁，一个获取了id=3的锁，
+         此时执行下一条语句时,第一个事务一需要3的锁（应该是执行完某一行记录的时候，亦或者说是事务提交之后，
+         只有都完成了排它锁才会自动释放），此时它有着id=4的锁，但是拿不到3的锁，就会一直卡着，导致死锁
+
+     解决方案：
+        为了解决这个问题，数据库系统实现了各种死锁检测和死锁超时机制。InnoDB存储引擎，能检测到死锁的循环依赖，
+        并立即返回一个错误。否则死锁会导致非常慢的查询。还有解决方式，就是当查询的时间达到锁等待超时的设定后
+        放弃锁请求。InnoDB目前处理死锁的方法是，将持有最少 行级 排他锁的事务进行回滚（死锁回滚算法）
+
+
+     实际中的死锁查看：
+        SHOW ENGINE INNODB STATUS;
+        里面有 status ,txt 打开，查看死锁信息
+
+        TRANSACTIONS
+        ------------
+        Trx id counter 100876
+        Purge done for trx's n:o < 0 undo n:o < 0 state: running but idle
+        History list length 0
+        LIST OF TRANSACTIONS FOR EACH SESSION:
+        ---TRANSACTION 283779358573776, not started
+        0 lock struct(s), heap size 1136, 0 row lock(s)
+        ---TRANSACTION 283779358572904, not started
+        0 lock struct(s), heap size 1136, 0 row lock(s)
+        ---TRANSACTION 283779358572032, not started
+        0 lock struct(s), heap size 1136, 0 row lock(s)
+        ---TRANSACTION 100874, ACTIVE 56 sec
+        2 lock struct(s), heap size 1136, 1 row lock(s)
+        MySQL thread id 5, OS thread handle 11688, query id 167 localhost ::1 root
+
+        显示 2 lock struct(s) 其中一个row 锁住； 1 row lock(s) 以及 ip地址 ：localhost
+
+     使用 for update 模拟死锁，需要把 自动提交 关闭
+        SET AUTOCOMMIT=1;
+
+        InnoDB引擎会把写操作(insert/update/delete/select for update)当做事务来处理.
+        所以单条UPDATE语句是不需要显式开启事务的.
+        MySQL默认会自动提交事务,每一条单独的查询都是一个事务.
+        所以使用 SELECT FOR UPDATE 时应该关闭自动提交后手动开启事务 START TRANSACTION.
+        否则 SELECT FOR UPDATE 的锁在事务自动提交后就释放了.（select 成功之后，该事务直接释放锁）
+
+        $db->query('SET AUTOCOMMIT=0');
+        $db->query('START TRANSACTION');
+        $db->query('SELECT FOR UPDATE');
+        if( all_success ) { COMMIT } else { ROLLBACK }
+        //commit提交事务后autocommit记得重新设为true,否则delete等这些写操作因为没有手动commit会自动回滚.
+        $db->query('SET AUTOCOMMIT=1');
+
+     死锁处理：
+        MySQL有两种死锁处理方式：
+            1.等待，直到超时（innodb_lock_wait_timeout=50s）。
+            2.发起死锁检测，主动回滚一条事务，让其他事务继续执行（innodb_deadlock_detect=on）。
+            由于性能原因，一般都是使用死锁检测来进行处理死锁。
+            注：事实证明，mysql会自动处理死锁情况
+
+        手动杀掉被锁住的线程：
+            使用：SHOW ENGINE INNODB STATUS;
+                查看被锁住的线程 id 如：  MySQL thread id 5, OS thread handle 11688, query id 167 localhost ::1 root
+                然后：SELECT * FROM information_schema.INNODB_TRX;
+                查看属性：trx_mysql_thread = 5 的 id是否 runnable 状态，如果是，说明此线程确实被锁住了
+                然后：kill thread id 即： kill 5;
+
+
+
+        死锁检测
+        死锁检测的原理是构建一个以事务为顶点、锁为边的有向图，判断有向图是否存在环，存在即有死锁。
+
+        回滚
+        检测到死锁之后，选择插入更新或者删除的行数最少的事务回滚，基于 INFORMATION_SCHEMA.INNODB_TRX 表中的 trx_weight 字段来判断。
+
+        四、如何避免发生死锁
+        收集死锁信息：
+        利用命令 SHOW ENGINE INNODB STATUS查看死锁原因。
+        调试阶段开启 innodb_print_all_deadlocks，收集所有死锁日志。
+        减少死锁：
+        使用事务，不使用 lock tables 。
+        保证没有长事务。
+        操作完之后立即提交事务，特别是在交互式命令行中。
+        如果在用 (SELECT ... FOR UPDATE or SELECT ... LOCK IN SHARE MODE)，尝试降低隔离级别。
+        修改多个表或者多个行的时候，将修改的顺序保持一致。
+        创建索引，可以使创建的锁更少。
+        最好不要用 (SELECT ... FOR UPDATE or SELECT ... LOCK IN SHARE MODE)。
+
+

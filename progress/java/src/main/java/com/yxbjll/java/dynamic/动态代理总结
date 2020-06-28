@@ -1,0 +1,72 @@
+一：动态代理与静态代理  https://www.jianshu.com/p/d332a0684c02
+    静态代理只能对某一个具体的类进行代理，而动态代理在编译期没有具体对象，只有在运行期才确定代理的具体对象，
+    因此动态代理可以为任何符合条件的对象生成代理对象。通过操作代理类来完成
+
+    动态代理实现步骤：
+        需要实现 InvocationHandler,通过传入需要代理的真实对象来进行代理操作，然后会重写 invoke()方法，
+        通过invoke()去调用具体的方法
+
+
+    //JDK动态代理代理类
+    public class CarHandler implements InvocationHandler{
+        //真实类的对象
+        private Object car;
+        //构造方法赋值给真实的类
+        public CarHandler(Object obj){
+            this.car = obj;
+        }
+    //代理类执行方法时，调用的是这个方法
+        public Object invoke(Object proxy, Method method, Object[] args) throws Throwable {
+            System.out.println("before");
+            Object res = method.invoke(car, args);
+            System.out.println("after");
+            return res;
+        }
+    }
+
+    总结：
+        每一个动态代理类都必须要实现InvocationHandler这个接口，并且每个代理类的实例都关联到了一个handler，
+            当我们通过代理对象调用一个方法的时候，这个方法的调用就会被转发为由InvocationHandler这个接口的invoke
+            方法来进行调用。我们来看看InvocationHandler这个接口的唯一一个方法 invoke 方法：
+
+            Object invoke(Object proxy, Method method, Object[] args)
+
+            我们看到这个方法一共接受三个参数，那么这三个参数分别代表什么呢？
+
+            proxy:　 指代我们所代理的那个真实对象
+            method:　指代的是我们所要调用真实对象的某个方法的Method对象
+            args:　　指代的是调用真实对象某个方法时接受的参数
+
+        Aop:的作用就是横切在类或者方法上，然后通过解析标签，将对应的类进行代理，这样可以在方法调用时，
+            进行一些特殊操作处理。针对于所有加了注解的
+
+
+二：jdk动态代理和 cglib动态代理区别   【https://www.jianshu.com/p/89135092accb】
+    JDK的动态代理依靠接口实现，入参必须有被代理类的接口，也就是carImpl.getClass().getInterfaces(),
+    如果代理类并没有实现接口，则不能使用JDK代理，这就要使用cglib动态代理了。
+
+    cglib动态代理是直接代理类，因此无需代理类实现接口
+
+
+三：spring中代理工具 Proxy
+    Proxy类是所有动态代理类的父类
+    介绍：
+        Proxy这个类的作用就是用来动态创建一个代理对象的类，用的最多的就是 newProxyInstance 这个方法：
+
+        public static Object newProxyInstance(ClassLoader loader, Class<?>[] interfaces, InvocationHandler h)
+        throws IllegalArgumentException
+
+        这个方法的作用就是得到一个动态的代理对象，其接收三个参数，我们来看看这三个参数所代表的含义：
+
+        loader:一个ClassLoader对象，定义了由哪个ClassLoader对象来对生成的代理对象进行加载
+        interfaces:一个Interface对象的数组，表示的是我将要给我需要代理的对象提供一组什么接口，如果我提供了一组
+            接口给它，那么这个代理对象就宣称实现了该接口(多态)，这样我就能调用这组接口中的方法了
+        h:一个InvocationHandler对象，表示的是当我这个动态代理对象在调用方法的时候，会关联到哪一个InvocationHandler对象上
+
+        缺点：
+            Proxy作为生成代理类的工具，唯一的缺点就是代理类需要实现一个接口。Proxy是jdk动态代理
+
+
+
+
+

@@ -1,0 +1,11 @@
+                                    关于spring及其相关的组件xml配置
+一：spring 初始化配置文件的读取
+    1.1：spring 启动会根据 web.xml 里面的配置去查找对应的配置文件，初始化容器
+         <context-param>
+             //容器配置路径
+             <param-name>contextConfigLocation</param-name>
+             <param-value>
+                 classpath*:/spring/application-context.xml
+             </param-value>
+         </context-param>
+

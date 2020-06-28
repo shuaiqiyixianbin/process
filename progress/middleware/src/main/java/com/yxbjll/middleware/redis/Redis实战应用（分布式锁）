@@ -1,0 +1,364 @@
+一：为何使用分布式锁：
+   在单个应用中，多线程下可以使用 普通的锁 如：Synchronized 关键字以及 Lock(重入锁)对公共资源进行锁定
+     ，防止多线程冲突，但是在分布式系统中如何解决，如果使用传统的锁，只能锁定对应于该系统中的一个资源，
+     n个系统就有n个线程可以获取同一个锁，因此就会导致资源冲突，因此需要使用分布式锁，来对分布式应用进行
+     锁的处理。
+
+二：使用Redis实现（仅限于多个分布式应用使用同一个Redis服务）：
+   对应于QuickLive的直播回调Utils:
+public class CallbackUtils {
+    public static long CALLBACK_THREAD_SLEEP = 100;      // 回调线程sleep时长
+    static String REDIS_CALLBACK_LOCK_NAME = "callback.multi.thread.lock"; // 多线程处理并发锁
+    static String REDIS_CALLBACK_LIST_NAME = "callback.task.list";          // 回调任务队列
+    static long REDIS_LOCK_EXPIRE_DURATION = 3000;          // Redis锁超时时间，单位毫秒
+    CallbackDealerThread thread = null;
+
+    private static CallbackUtils instance = new CallbackUtils();
+    public static CallbackUtils getInstance() {
+        return instance;
+    }
+
+    public void startThread(){
+        thread = new CallbackDealerThread(CALLBACK_THREAD_SLEEP, REDIS_CALLBACK_LOCK_NAME, REDIS_LOCK_EXPIRE_DURATION);
+        thread.start();
+    }
+
+    public void shutdown(){
+        if(thread != null){
+            thread.finished = true;
+        }
+    }
+
+    public void doTask(CallbackTask task){
+        if(task == null) return;
+
+        if(!dealTask(task)){    // 任务失败，添加到任务列表中
+            System.out.println("callback called failed:" + task.getCallbackURI() + " cid=" + task.getChannelId() + " first time");
+            task.setTimes(1);
+            task.setTriggerTime((new Date()).getTime() + 1000); // 1秒后重试
+            Jedis redis = RedisUtils.connectRedis();
+            if(redis != null){
+                redis.zadd(REDIS_CALLBACK_LIST_NAME, task.getTriggerTime(), task.toString());
+                RedisUtils.closeRedis(redis);
+            }
+        }else{
+            System.out.println("callback called successfully:" + task.getCallbackURI() + " cid=" + task.getChannelId());
+        }
+    }
+
+    /**
+     * 新建直播开始回调
+     * @param channel     直播频道
+     * @param streamStatus  流状态
+     * @return 是否添加任务成功
+     */
+    public boolean addStartTask(ChannelFront channel, StreamStatus streamStatus){
+        if(channel == null ||
+                channel.getCallbackURI() == null ||
+                channel.getCallbackURI().isEmpty() ||
+                streamStatus == null) return false;
+
+        CallbackTask task = new CallbackTask();
+        // 直播具有时效性，设置8次尝试
+        task.setMaxRetryTimes(8);
+        task.setCallbackURI(channel.getCallbackURI());
+        task.setChannelId(channel.getChannelId());
+        task.addParam("action", "start");
+        task.addParam("rtmp_uri", streamStatus.getRtmpURI());
+        task.addParam("m3u8_uri", streamStatus.getHlsURI());
+        task.addParam("flv_uri", streamStatus.getFlvURI());
+        doTask(task);
+        return true;
+    }
+
+    /**
+     * 新建直播停止的回调
+     * @param channel 直播频道
+     * @return 添加回调任务是否成功
+     */
+    public boolean addStopTask(ChannelFront channel){
+        if(channel == null ||
+                channel.getCallbackURI() == null ||
+                channel.getCallbackURI().isEmpty()) return false;
+
+        CallbackTask task = new CallbackTask();
+        task.setMaxRetryTimes(8);
+        task.setCallbackURI(channel.getCallbackURI());
+        task.setChannelId(channel.getChannelId());
+        task.addParam("action", "stop");
+        doTask(task);
+        return true;
+    }
+
+    /**
+     * 新建回放生成的回调任务
+     * @param channel   直播频道
+     * @param liveLog   回放对象
+     * @return 是否添加成功
+     */
+    public boolean addPlaybackTask(ChannelFront channel, LiveLog liveLog){
+        if(channel == null ||
+                channel.getCallbackURI() == null ||
+                channel.getCallbackURI().isEmpty() ||
+                liveLog == null) return false;
+
+        CallbackTask task = new CallbackTask();
+        // 尝试16次，最长通信间隔为65536秒
+        task.setMaxRetryTimes(16);
+        task.setCallbackURI(channel.getCallbackURI());
+        task.setChannelId(channel.getChannelId());
+        task.addParam("action", "playback");
+        task.addParam("playback_id", liveLog.getLogId() + "");
+        task.addParam("playback_uri", liveLog.getVodURI());
+        task.addParam("start_time", StringUtils.date2string(liveLog.getStartTime()));
+        task.addParam("duration", liveLog.getDuration()+"");
+        task.addParam("thumbnail", liveLog.getPosterURI());
+        task.addParam("height", liveLog.getHeight()+"");
+        task.addParam("width", liveLog.getWidth()+"");
+
+        doTask(task);
+        return true;
+    }
+
+    /**
+     * 新建回放删除的回调任务
+     * @param channel   直播频道
+     * @param liveLog   回放对象
+     * @return 是否添加成功
+     */
+    public boolean addPlaybackDeleteTask(ChannelFront channel, LiveLog liveLog){
+        if(channel == null ||
+                channel.getCallbackURI() == null ||
+                channel.getCallbackURI().isEmpty() ||
+                liveLog == null) return false;
+
+        CallbackTask task = new CallbackTask();
+        // 尝试16次，最长通信间隔为65536秒
+        task.setMaxRetryTimes(16);
+        task.setCallbackURI(channel.getCallbackURI());
+        task.setChannelId(channel.getChannelId());
+        task.addParam("action", "playback_delete");
+        task.addParam("playback_id", liveLog.getLogId() + "");
+
+        doTask(task);
+        return true;
+    }
+
+    /**
+     * 新建回放编辑的回调任务
+     * @param channel   直播频道
+     * @param sourceLogId 编辑前的回放Id
+     * @param liveLog   编辑后回放对象
+     * @return 是否添加成功
+     */
+    public boolean addPlaybackEditTask(ChannelFront channel, Long sourceLogId, LiveLog liveLog){
+        if(channel == null ||
+                channel.getCallbackURI() == null ||
+                channel.getCallbackURI().isEmpty() ||
+                liveLog == null) return false;
+
+        CallbackTask task = new CallbackTask();
+        // 尝试16次，最长通信间隔为65536秒
+        task.setMaxRetryTimes(16);
+        task.setCallbackURI(channel.getCallbackURI());
+        task.setChannelId(channel.getChannelId());
+        task.addParam("action", "playback_edit");
+        task.addParam("playback_id", sourceLogId + "");
+        task.addParam("new_playback_id", liveLog.getLogId() + "");
+        task.addParam("playback_uri", liveLog.getVodURI());
+        task.addParam("start_time", StringUtils.date2string(liveLog.getStartTime()));
+        task.addParam("duration", liveLog.getDuration()+"");
+        task.addParam("thumbnail", liveLog.getPosterURI());
+        task.addParam("height", liveLog.getHeight()+"");
+        task.addParam("width", liveLog.getWidth()+"");
+
+        doTask(task);
+        return true;
+    }
+
+
+    /**
+     * 处理回调任务，返回是否处理成功
+     * @return t/f
+     */
+    private static boolean dealTask(CallbackTask task){
+        if(task == null) return false;
+
+        OkHttpClient client = new OkHttpClient();
+        Request.Builder requestBuilder = new Request.Builder();
+        requestBuilder.url(task.getCallbackURI());
+        FormBody.Builder builder = new FormBody.Builder();
+        // 添加频道Id参数
+        builder.add("channel_id", ""+task.getChannelId());
+        if(task.getParams() != null && task.getParams().size() > 0) {   // 添加其他参数
+            for (Iterator<Map.Entry<String, String>> iter = task.getParams().entrySet().iterator(); iter.hasNext();) {
+                Map.Entry<String, String> entry = iter.next();
+                builder.add(entry.getKey(), entry.getValue());
+            }
+            requestBuilder.post(builder.build());
+        }
+
+        Response response = null;
+        try {
+            response = client.newCall(requestBuilder.build()).execute();
+            return response.isSuccessful();
+        }catch (IOException e){
+            //e.printStackTrace();
+        }finally {
+            if(response != null) response.body().close();
+        }
+        return false;
+    }
+
+    public class CallbackDealerThread extends Thread {
+        private long sleepDuration;
+        private String lockName;
+        private long lockDuration;
+        private boolean finished;
+        Jedis redis;
+
+        public CallbackDealerThread(long sleepDuration, String lockName, long lockDuration){
+            finished = false;
+            this.sleepDuration = sleepDuration;
+            this.lockName = lockName;
+            this.lockDuration = lockDuration;
+        }
+
+        @Override
+        public void run() {
+            redis = RedisUtils.connectRedis();
+            if(redis == null) return;
+
+            while (!finished){
+                // 取得任务锁 注：此处之所以使用 redis 分布式锁，主要是 有序集合（zset）不支持读取并删除数据
+                // 正因此怕多台服务器在获取锁期间请求同一任务，导致任务重复。如果使用 List 数据结构，获取并删除
+                // 因为是原子操作，故不会被多个消费
+                acquireLock();
+                // 从列表中获取需要处理的任务
+                String json = acquireTask();
+                releaseLock();
+                // 处理任务
+                if(json != null){
+                    CallbackTask task = new CallbackTask(json);
+                    if(dealTask(task)){ // 发送成功
+                        System.out.println((new Date()).getTime() + "callback called successfully:" + task.getCallbackURI() + " cid=" + task.getChannelId());
+                    }else{
+                        System.out.println((new Date()).getTime() + "callback called failed:" + task.getCallbackURI() + " cid=" + task.getChannelId() + " sendtimes=" + task.getTimes());
+                        // 增加发送失败次数，如果超过上限，取消发送，否则重新计算下次发送时间，重新放回列表
+                        task.setTimes(task.getTimes()+1);
+                        if(task.getTimes() > task.getMaxRetryTimes()){  // 超过发送次数上限
+                            sendFailedMessage(task);
+                        }else{      // 计算惩罚时间，加回有序表中
+                            task.setTriggerTime(calculateTriggerTime(task));
+                            redis.zadd(REDIS_CALLBACK_LIST_NAME, task.getTriggerTime(), task.toString());
+                        }
+                    }
+                }
+
+                try {
+                    sleep(sleepDuration);
+                }catch (Exception e){e.printStackTrace();}
+            }
+
+            RedisUtils.closeRedis(redis);
+        }
+
+        /**
+         * 获取并发锁
+         */
+        private void acquireLock(){
+            while(redis.setnx(lockName, ((new Date()).getTime() + lockDuration) + "") == 0){    // 冲突，等待
+                long now = (new Date()).getTime();
+                if(now > StringUtils.string2long(redis.get(lockName), 0) /*已经超时*/&&
+                        now > StringUtils.string2long(redis.getSet(lockName, (now + lockDuration) + ""), 0)/*已经抢到锁*/){
+                    break;
+                }else{
+                    try {
+                        Thread.sleep(50);
+                    }catch (Exception e){e.printStackTrace();}
+                }
+            }
+        }
+
+        /**
+         * 释放并发锁
+         */
+        private void releaseLock(){
+            redis.del(lockName);
+        }
+
+        /**
+         * 从redis中获取要处理的回调任务
+         * @return 回调任务对象json串
+         */
+        private String acquireTask(){
+            Set<Tuple> taskSet =  redis.zrangeWithScores(REDIS_CALLBACK_LIST_NAME, 0, -1);
+            // 从列表中找第一个score小于当前时间的任务
+            Tuple t = taskSet.size() > 0 ? taskSet.iterator().next() : null;
+            String taskJson = t == null? null : (t.getScore()>(new Date()).getTime()? null : t.getElement());
+            if(taskJson != null){
+                redis.zrem(REDIS_CALLBACK_LIST_NAME, taskJson);
+            }
+            return  taskJson;
+        }
+    }
+
+    /**
+     * 根据重试次数计算下次触发事件
+     * @param task 任务
+     * @return 计算的触发时间
+     */
+    private long calculateTriggerTime(CallbackTask task){
+        if(task == null) return (new Date()).getTime() + 60*1000;
+
+        // 2的指数倍
+        long interval = 1 << task.getTimes();
+        return (new Date()).getTime() + interval*1000;
+    }
+
+    /**
+     * 发送回调失败通知
+     * @param task 失败回调任务
+     */
+    private void sendFailedMessage(CallbackTask task){
+        if(task == null) return;
+
+        // 获取任务所属的用户
+        ChannelFront channelFront = ChannelUtils.getChannelFront(task.getChannelId());
+        if(channelFront == null) return;
+
+        Message message = new Message();
+        message.setHeader("[" + channelFront.getTitle() + "]回调失败");
+        message.setMessage("在尝试" + task.getMaxRetryTimes() +
+                "次后，回调没有发送成功，请检查服务是否运行正常或检查地址["+ task.getCallbackURI() + "]是否正确");
+        message.setType(Message.MESSAGE_TYPE_UNI);
+        message.setSender(0L);
+        message.setSendTime(new Date());
+        message.setReceiver(channelFront.getSponId());
+        message.setChecked(false);
+        MessageUtils.addMessage(message);
+    }
+}
+
+   代码分析：核心代码就是获取Redis的锁，一开始是没有的，如果一个线程获取了锁，就会生成一个对应名称的
+
+callback.multi.thread.lock 的表里面有过期时间（超过了说明锁已经过期了，其它线程也可以去抢夺锁），获得锁后，取得任务然后把该表（锁）删除，下一个线程就可以重新生成该表，也就意味着有线程获取到了锁。其他只是用该表作为一个标识，表示有线程正在操作，其它线程不能进去，不是一个实际以为的锁，也就是说只要能对共享资源进行阻塞的都叫做锁。
+      核心代码分析：
+
+    /** * 获取并发锁 */
+    private void acquireLock(){
+       while(redis.setnx(lockName, ((new Date()).getTime() + lockDuration) + "") == 0){ // 冲突，等待
+       long now = (new Date()).getTime();
+       if(now > StringUtils.string2long(redis.get(lockName), 0) /*已经超时*/&& now >                                 
+                StringUtils.string2long(redis.getSet(lockName, (now + lockDuration) + ""), 0)/*已经抢到锁*/){
+            break;
+       }else{
+        try { Thread.sleep(50); }catch (Exception e){e.printStackTrace();} } } } /** * 释放并发锁 */
+          private void releaseLock(){ redis.del(lockName); 
+
+       setnx：（set if not exist）:如果没有该锁（表）就说明此时可以去获取锁。如果存在lockName返回false，此时说明已经有线程拿到了锁。此时去判断锁是否失效（过期），如果不进行判断可能进行了线程阻塞，任务永远执行不了（这样防止由于不正确的操作，导致锁一直没有释放，任务就执行不下去，加上一个过期时间就是为了防止在这种情况下程序依然可以正常运行），因此要在锁冲突的时候继续判断锁是否过期，如果过期了就重新获取锁。
+        getSet()：方法设置新值返回旧值。为null会报错，因此取得值一定是有意义的。而且getSet()是原子操作，如果不报错，并且当前时间又大于返回的过期时间，说明此时获得了锁，并且有效，因此继续下面的服务操作。这就是整个分布式锁的核心。
+
+  附赠：分布式锁的详解：
+   https://www.cnblogs.com/seesun2012/p/9214653.html
+

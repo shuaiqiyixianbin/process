@@ -1,0 +1,275 @@
+一.排序：非常耗费内存。如果利用索引进行排序非常快，叫做index sort，如果利用其它不是索引的进行排序，此时叫
+    做file sort，注意，此时mysql会自己在内存里进行排序，两种方法：
+
+    1、两遍扫描算法(Two passes)
+    实现方式是先将需要排序的字段和可以直接定位到相关行数据的指针信息取出，然后在设定的内存（通过参数
+    sort_buffer_size设定）中进行排序，完成排序之后再次通过行指针信息取出所需的Columns
+    注：该算法是4.1之前采用的算法，它需要两次访问数据，尤其是第二次读取操作会导致大量的随机I/O操作。另一
+    方面，内存开销较小
+
+    2、 一次扫描算法(single pass)
+    该算法一次性将所需的Columns全部取出，在内存中排序后直接将结果输出
+    注： 从 MySQL 4.1 版本开始使用该算法。它减少了I/O的次数，效率较高，但是内存开销也较大。如果我们将并不
+    需要的Columns也取出来，就会极大地浪费排序过程所需要 的内存。在 MySQL 4.1 之后的版本中，可以通过设置
+    max_length_for_sort_data 参数来控制 MySQL 选择第一种排序算法还是第二种。当取出的所有大字段总大小大于
+    max_length_for_sort_data 的设置时，MySQL 就会选择使用第一种排序算法，反之，则会选择第二种。为了尽可
+    能地提高排序性能，我们自然更希望使用第二种排序算法，所以在 Query 中仅仅取出需要的 Columns 是非常有必
+    要的。
+
+    注意：因此如果平时大表进行排序的时候，取出数据就要格外慎重，不可直接select * 影响内存导致排序过慢，内
+    存耗尽。对于排序字段：如果都是一张表里面的字段，那么对于关联查询来说，取出一张表之后会进行排序，而如果
+    涉及几张表，那么就会对查完结果集的临时表进行排序，即使有limit也会对所有的进行排序，而mysql5.6在这方面
+    有优化，应该会进行一些限制操作。
+    对于排序如果内存空间不够就会在磁盘上操作，并且分成许多小的部分，最后进行合并，返回结果集
+   注意：确保任何的group by 和order by中的表达式只涉及到一个表中的列，这样mysql才有可能使用索引来优化
+    这个过程。
+
+二：关于连表查询时的优化心得：
+   1.小表驱动大表（最重要）：首先是数据库处理查询操作：假如外面是200，里面是十万，此时小表的数据会循环取出一
+    条数据去与大表中的数据匹配，直到找完，此时的数据库查询是200次（在大表里面只需要查询一次，前提是根据主键
+    来获取，只需要查询一次，否则大表查询就会进行全表查询，那么此时优势就没了）
+
+    当大表数据很大（一般为左边），此时和小表联查，如果小表对应的查询字段有索引的话，查询快不
+    了多少，因为数据量太少，索引提升效率不明显，而如果左边小表，右边大表时，对大表进行索引，这时候次数远远
+    小于全表扫描，因此对于效率的提升非常显著。综上所述，联查时都会是小表驱动大表，此时加上索引会使得效率很
+    高
+    综上所述：此时小-->大 ：200 * 1（因为主键查询一次即可查出） 大-->小 10万 * 1
+
+三：对于连表查询的一些写法（inner join 、left join、right join等等）
+
+   inner join 用于数值相等时进行取值，它是交叉连接算法（使用时需要添加查询条件，否则会变成笛卡尔积，数据量很大）
+    ，会是两个表相乘，会导致查询结果非常大，效率很低。
+   left join这种，只是普通的连表查，因此很多情况下看是否可以把inner join改成其他的join等等，提高效率。
+   从连表查询的实现方式优化：这些连表查询的优化，inner join 和left join 需要对右表的对应字段进行索引处理这样就会极大地提高效率，而right join要对左表进行索引，因为以右边为准，从右边去左边表里查询，这些极大提高查询效率。
+   如果没有join或者表连接关键字，此时数据库会自己判断那个表的数据量少，然后进行驱动。非常人性化。其他情况也要看看数据库有没有类似的优化处理。
+
+四：子查询优化（子查询不是一定会导致慢，还是要根据具体类型以及mysql的执行计划来判断，在mysql5.7 子查询
+    是会走索引的）
+
+    #子查询：
+    SELECT * FROM sakila.film
+    WHERE film_id in(SELECT film_id FROM sakila.film_actor WHERE actor_id =1); 
+
+    #然而mysql不会先查询子查询，而是会这样执行，导致非常繁琐
+    SELECT * FROM sakila.film
+    WHERE EXISTS(SELECT * FROM sakila.film_actor WHERE actor_id =1
+                 AND film_actor.film_id = film.film_id);
+    #重构
+    SELECT film.* FROM sakila.film
+    INNER JOIN sakila.film_actor USING(film_id)
+    WHERE actor_id =1
+
+    据说在mysql 5.7之前的版本：
+    使用in（查询语句）子查询，因为mysql对子查询的优化不行，其查询过程为：先查询最外面一层，查询完之后
+    ，用查询到的数据来和子查询的条件作对比，找到符合条件的记录，因此查询次数为 selectNum * 子查询的数
+    量，并且会导致索引失效，查询较慢。如果将子查询移出。生成一个临时表，然后再利用临时表的数据去查询，
+    这样都可以利用索引，加快查询速度。如：
+    select * from t_course_student_type cst where cst.course_id in(select c. id from t_course c
+    where c.name = "CR7"),分析该sql发现：sql优化器会先读取 result = select * from
+    t_course_student_type cst ，获取所有数据,然后执行子查询 
+
+    select c. id from t_course c where c.name = "CR7" where (result.course_id) exist.导致所有的索引
+    都用不了
+
+    换种新方式：(待检验！)
+    select cst.*  from  t_course_student_type cst , (select  course_id from t_course c where c.name = "CR7") tpp2            where  cst.course_id   =  tpp2.course_id ;
+    这样 t_course_student_type 是可以作用到索引course_id上的,而临时表也可以用到索引
+
+    实战备用sql：
+        1.原始子查询
+            SELECT * FROM t_course c WHERE c.COURSEWARE_ID in(SELECT cw.COURSEWARE_ID FROM
+             t_courseware cw WHERE cw.org_id = 28)
+
+       2.取出子查询
+            SELECT c.*
+             FROM t_course c,(SELECT cw.courseware_id FROM t_courseware cw WHERE cw.org_id =28)cwpp
+             WHERE c.COURSEWARE_ID = cwpp.courseware_id
+
+      3.join 连接（实际中有时候还慢点）
+            SELECT c.*
+             FROM t_course c INNER JOIN (SELECT cw.courseware_id FROM t_courseware cw WHERE
+             cw.org_id =28)cwpp ON cwpp.courseware_id = c.courseware_id
+
+
+五：union查询：
+    对于union查询，mysql将一系列的单个查询结果放到一张临时表中，然后再重新读出临时表数据来完成union查询，
+    在mysql中，每个查询都是一次关联，所以读取结果临时表也是一次关联
+
+
+六：关联查询：
+    当前 mysql 对任何关联都执行嵌套循环关联操作，即mysql先在一个表中循环取出单条数据，然后再嵌套循环到
+    下一个表中寻找匹配的行，依次下去，直到找到表中所有的记录为止。然后根据各个表匹配的行，返回查询中需
+    要的各个列。mysql会尝试在最后一个关联表中找到所有匹配的行，如果最后一个关联表无法找到更多的行以后，
+    mysql返回到上一层次关联表，看是否能找到更多记录。
+
+    join关联：
+        select tab1.col1,tab2.col2 from tab1 inner join tab2 using(col3)  where tab1.col1 in(5,6);
+
+    假设mysql按照查询中的表顺序进行关联操作，使用如下伪代码表示：
+        outer_iter = iterator over tab1 where col1 in(5,6)
+        out_row = outer_iter.next
+        while out_row
+            inner_iter = iterator over tab2 where col3 = outer_row.col3
+            inner_row = inner_iter.next
+            while inner_row
+                output [outer_row.col1,inner_row.col2]
+                inner_row = inner_iter.next
+            end
+            outer_row = outer_iter.next
+        end
+
+    left join也是同样循环匹配
+    关联查询总结：
+        本质上，mysql对所有的类型的查询都以同样的方式运行。例如；mysql在 from子句中遇到子查询时，先执行
+        子查询并将其结果放到一个临时表中，然后将这个临时表当做一个正常表对待。mysql再执行union查询时也使用
+        类似的临时表，在遇到右外连接的时候。mysql将其改写为等价的左外连接。所有的查询类型都转换成类似的执行
+        计划
+
+
+七：索引
+    实现：索引是在存储引擎层实现的，而不是在服务器层实现，B+Tree,即每一个叶子节点都包含指向下一个叶子节点的指针，
+          从而方便子节点的范围遍历
+
+    建索引的几大原则：
+    1.最左前缀匹配原则
+        mysql会一直向右匹配直到遇到范围查询 >、 <、 between、 like 就停止匹配，比如：a=1 and b=2 and
+        c>3 and d = 4 如果建立（a,b,c,d） 则d用不到索引，除非建立 （a,b,d,c）的联合索引，则可以使用，
+        其实跟sql中的索引写法没关系，只是跟 索引创建的顺序有关系
+
+        mysql查询优化器：
+        如果建的索引是 (name, cid)。而查询的语句是 cid=1 AND name=’小红’。为什么还能利用到索引？
+
+        当按照索引中所有列进行精确匹配（“=” 或 “IN”）时，索引可以被用到，并且 type 为 const。理论上索引对
+        顺序是敏感的，但是由于 MySQL 的查询优化器会自动调整 where 子句的条件顺序以使用适合的索引，所以 MySQL
+        不存在 where 子句的顺序问题而造成索引失效
+
+
+    2.选择区分度高的列作为索引
+        区分度的公式是：count(distinct col)/count(*),表示字段不重复的比例，比例越大，扫描纪录越少，
+
+    3.索引列不能参与计算，保持列干净
+        比如：from_unixtime(create_time) = '2019-11-19',就不能使用到索引，因为 b+tree中存的都是表中的
+        字段值，但进行检索时，需要把所有元素都应用函数才能比较，成本太大，改写成
+        create_time = unix_timestamp('2019-11-19');
+
+    4.尽量拓展索引，不要新加索引
+        如果表中已经有a索引，现在要加（a,b）索引，只需要修改原先索引即可，还是可以使用联合索引的索引列
+
+    5.索引字段尽可能小的原因：  【https://crossoverjie.top/JCSprout/#/db/MySQL-Index】
+        因为索引结构是 B+TREE ，只要叶子结点才保存数据(相当于最底层才是真实数据)，其他结点都是保存的索引的数据，
+        而每查找一次范围，都会把那个范围内的磁盘块的数据加载到内存中(也就是一次 IO 操作，因为 IO消耗大)。
+        观察树的结构，查询需要经历几次 io 是由树的高度决定，而树的高度又是由磁盘块，数据项的大小决定的。
+        磁盘块越大，数据项越小那么树的高度就越低，这就是为什么索引的字段要尽可能的小的原因。
+
+
+    6.范围查询；
+        如此字段有索引，并且索引为范围 > and <  那么，对于当前字段的整个范围是可以走索引的，但是后面的索引字段
+        则不会走索引，即：范围索引是针对于整个字段，而不是单个区间
+
+
+    7.心得：：quicklive直播平台的观看统计以及账户统计中优化实例：平时打开需要三四秒，弄了联合索引之后，
+        达到了毫秒级别，索引的顺序要有讲究，范围的放最后，不然可能会失效，同时，失效后可能会使得数据库
+        的查询变更慢！！！！
+        同时,只对一个字段建了索引，发现没什么效果，原来该字段只有三种类型，因此命中率太高了，所以和全表
+        查询差不多。因此考虑到联合索引，增大可能性
+        其次，还发现一个问题：就是当一个账号的数据量非常大时，联合索引竟然效果不太明显。这是因为该账号
+        数据量太多，可以近似看成占用了整个表空间的十分之6，因此查询出来的记录太多，其实就相当于全表联查
+        了，效果不是太明显，只有当数据量比较少的时候（是指该账号下的数据，表整体数据依然需要很大），效
+        果才是最好的
+
+    索引特性：
+        1.覆盖索引：
+            覆盖索引是select的数据列只用从索引中就能够取得，不必读取数据行，换句话说查询列要被所建的索引覆盖。
+            一个索引包含(或覆盖)所有需要查询的字段的值，称为‘覆盖索引’。即只需扫描索引而无须回表。
+            innodb的聚簇索引，覆盖索引对innodb表特别有用。(innodb的二级索引在叶子节点中保存了行的主键值
+            ，所以如果二级主键能够覆盖查询，则可以避免对主键索引的二次查询)
+
+            也就是说：覆盖索引只是针对于 辅助索引，主键索引是一定要读取数据行的，也就是所谓的回表
+
+            覆盖索引必须要存储索引列的值，而哈希索引、空间索引和全文索引不存储索引列的值，所以mysql只能
+            用B-tree索引做覆盖索引。
+
+            因为使用B+TREE存储索引数据（索引也是数据库的数据）,因为叶子节点上存储着数据，其他索引也是通
+            过主键去查找数据，如果可以直接把索引的数据读出使用而不用再次进入数据库表中进行查询操作，可以
+            极大地提高效率（当然被查询的数据也必须在索引这个数据结构中）。注：索引数据是索引的索引集合
+            （包括主键以及其他普通索引）。
+
+        理解；对于查询某些字段少的可以考虑通过 创建联合索引的方式（联合索引可以把对应索引的数据都存储到索引结构中）
+              来避免回表查询，但是也要考虑新建索引之后数据量增大，数据维护的困难性
+
+
+实践部分：
+    1.优化实践：
+        explain的输出结果Extra字段为 Using index 时，能够触发索引覆盖
+            using index:表示数据不需要回表查询，查询所需的数据都是从索引文件（数据）中获取，
+           using where:需要回表进行数据查询
+
+    2.索引方面的查询
+       2.1：索引列不要使用负向查询，如 ：!=  、  not in() 、 not null 等等，这些都是会走全表扫描的
+       2.2：前导模糊查询不能使用索引：如：select name from user where name like '%zhangsan' 后导可以
+       2.3：数据区分不明显的不建议使用索引
+
+    3.优化注意点：
+        3.1：
+        EXPLAIN SELECT COUNT(*) FROM t2_cdn_log 
+        where type=1 and object_Id in (51,52,54,59,61,69,70,71,97,98,103,104,105,106) 
+        and UNIX_TIMESTAMP('2018-12-05 00:00:00')<=UNIX_TIMESTAMP(log_time) 
+        and UNIX_TIMESTAMP(log_time)<=UNIX_TIMESTAMP('2018-12-05 23:59:59') #group by time;
+
+      3.2 ：
+        EXPLAIN select sum(response_size),(UNIX_TIMESTAMP(log_time)-UNIX_TIMESTAMP('2018-12-05 00:00:00')) div 300 as time 
+        from t2_cdn_log where '2018-12-05 00:00:00'<=log_time
+        and log_time<='2018-12-05 23:59:59'
+        and type=1 and object_Id in (51,52,54,59,61,69,70,71,97,98,103,104,105,106) group by time
+
+      两条语句都显示走了索引，但是第一条显示rows为七百多万，但是第二条只有14条：原因就是使用了
+        UNIX_TIMESTAMP()时间转换函数而导致索引失效，尽管显示其使用了index但是因为这种原因而导致索引无效
+
+
+    mysql执行计划：
+        SELECT * from t_tag_api_info;
+        SHOW STATUS LIKE 'Last_query_cost';
+        如：value: 2.399000 含义：这个结果表示mysql的优化器认为大概需要做2.399个数据页的随机查询，才能完成上述
+        查询
+
+
+执行计划：
+    一.mysql查询执行过程：
+      1.客户端发送一条查询到服务器
+      2.服务器先查询缓存，如果缓存命中，就立刻返回存储在缓存中的结果。否则进行下一步
+      3.服务器端进行SQL解析、预处理，再由优化器生成对应的执行计划
+      4.MYSQL根据优化器生成的执行计划，调用存储引擎的API来执行查询
+      5.将结果返回客户端
+
+
+    二：mysql使用基于成本的优化器，尝试预测一个查询使用某种执行计划的成本，并选择其中成本最小的一个。可以通过
+        Last_query_cost来得知 mysql计算的当前查询的成本
+
+
+三：数据库sql优化具体步骤
+    3.1：explain
+         使用explain可以查看数据库的执行计划，从中可以看到每个表的查询计划，由此可以从中分析执行是否够合理，
+         此处只是初步验证
+
+    3.2：profile
+         使用 Profiling功能可以对比出sql实际执行的详细信息。(跟explain组合验证)。sql执行消耗的最大两资源为：
+         IO 和 CPU,下面通过 BLOCK IO 和 CPU 两项 profile 信息进行分析
+
+    操作：首先 set profiling = 1; 然后执行对应的 select 语句，然后查看 profile 信息：
+          show profiles;
+          之后会看到前面的sql语句 及其查询id Query_id
+          再执行：
+          show profile CPU,BLOCK IO io for query 1; 可以查看具体query对应的 profile 信息
+          包含以下信息：
+          status        Duration   CPU_user   CPU_system   Block_ops_in         Block_ops_out
+          执行的操作    耗时                                插入磁盘(数据)的io    读取磁盘数据的io消耗
+
+          可以通过 cpu 以及 io 的消耗来决定那种 query 方式是最优的
+
+
+
+
+
+
+
+

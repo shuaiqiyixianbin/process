@@ -1,0 +1,117 @@
+一：快速排序
+List<FlowUseCondition> sortActiveFlowList = quickSort(activeDurationList);
+
+//快速排序获取最小的时间
+public List<FlowUseCondition> quickSort(List<FlowUseCondition> list){
+    if(list==null || list.size()==0) return null;
+    if(list.size()<2) return list;
+    final long index = list.get(0).getActiveTime().getTime();
+    final ArrayList<FlowUseCondition> begin = new ArrayList<FlowUseCondition>();
+    final ArrayList<FlowUseCondition> end = new ArrayList<FlowUseCondition>();
+    long choice;
+    for(int i=1;i<list.size();i++){
+        choice = list.get(i).getActiveTime().getTime();
+        if(choice<index) begin.add(list.get(i));
+        else{
+            end.add(list.get(i));
+        }
+    }
+
+    ArrayList<FlowUseCondition> resultList = (ArrayList<FlowUseCondition>) quickSort(begin);
+    if(resultList==null) resultList = new ArrayList<FlowUseCondition>();
+    resultList.add(list.get(0));
+    if(quickSort(end)!=null){
+        resultList.addAll(quickSort(end));
+    }
+   return resultList;
+}
+
+
+
+  /**
+     * 快速排序：通过与某一值进行对比，小的放左边，大的放右边，然后再把小的部分的再选
+     * 一个值，继续重复操作
+     */
+     public static List<Integer> quickSort(List<Integer> arr){
+         if (arr == null || arr.size()<=0) return null;
+         int index = arr.get(0);
+         List<Integer> begin = new ArrayList<>();
+         List<Integer> end = new ArrayList<>();
+         int choice;
+         for(int i=1;i<arr.size();i++){
+             choice = arr.get(i);
+             if(choice>index){
+                 begin.add(arr.get(i));
+             } else{
+                 end.add(arr.get(i));
+             }
+         }
+
+         ArrayList<Integer> resultList = null;
+         if (begin != null || begin.size()>0){
+             resultList = (ArrayList<Integer>) quickSort(begin);
+         }
+         if(resultList==null || resultList.size()<=0){
+             resultList = new ArrayList<>();
+         }
+         resultList.add(arr.get(0));
+
+         List<Integer> endList = quickSort(end);
+         if(endList!=null && endList.size()>0){
+             resultList.addAll(endList);
+         }
+         return resultList;
+     }
+
+
+
+    public static void main(String[] args){
+        int[] arr = {13,43,523,2,12,43,5346,213,12,22,1};
+        List<Integer> a = new ArrayList<>();
+        for (int i=0;i<arr.length;i++){
+            a.add(arr[i]);
+        }
+
+        //bubbleSort(a);
+        List<Integer> integerList = quickSort(a);
+        for (int i=0;i<integerList.size();i++){
+            System.out.print(integerList.get(i)+",");
+        }
+    }
+
+以上方式不建议使用，推荐使用compare 方法
+
+       Collections.sort(activesList, new Comparator<Map<String, String>>() {
+            @Override
+            public int compare(Map<String, String> o1, Map<String, String> o2) {
+                return Integer.parseInt(o1.get("sort"))-Integer.parseInt(o2.get("sort"));
+            }
+        });
+
+
+二：冒泡排序
+    /**
+      * bubbleSort:冒泡排序，核心思想就是从最后一位数字开始一直和前面的进行比较，通过换位一步步实现.(我们反一下，从前到后)
+      * 注意：一次循环只是把前一个和相邻的后一位的位置给改变了，如果要改完之后继续，就要两个循环实现
+      * @param a
+      */
+    public static void bubbleSort(int[] a){
+        int temp;
+        for (int i=1;i<a.length;i++){
+            for (int j=0;j<a.length-i;j++){
+                if (a[j]>a[j+1]){
+                    temp = a[j];
+                    a[j] = a[j+1];
+                    a[j+1] = temp;
+                }
+            }
+        }
+        for (int k=0;k<a.length;k++){
+            System.out.print(a[k]+",");
+        }
+    }
+
+    public static void main(String[] args){
+        int[] a = {13,43,523,2,12,43,5346,213,12,22,1};
+        bubbleSort(a);
+    }

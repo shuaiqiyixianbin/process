@@ -1,0 +1,134 @@
+一：java8 双冒号用法总结 ::
+    1.1:是java8的一种语法糖,形式如： this::function
+        案例见 DoubleColon.java
+        如：
+            //两种写法
+            list.forEach(value -> printValue(value));
+            list.forEach(DoubleColon::printValue);
+        说明：在 static 方法中 只能使用 类名::function, 普通方法可以： this::function,均表示方法调用
+
+    1.2：高级用法
+        高级用法,使用双冒号可以使得普通方法具备了 Runnable 等功能
+
+        DELAY_EXPORT_EXECUTOR.schedule(this::doExport, 2000, TimeUnit.MILLISECONDS);
+        protected void doExport(){
+        		Thread.interrupted();
+        		System.out.println("doExport");
+        	}
+
+
+二：Optional 使用  具体参考：https://blog.csdn.net/csdn9988680/article/details/80816457
+    详细使用见 * [ OptionalTest.java ]
+    注意点：
+        1.Optional 主要用作返回类型。在获取到这个类型的实例后，如果它有值，你可以取得这个值，否则可以进行一些替代行为。
+        2.Optional 不是 Serializable。因此，它不应该用作类的字段。
+          如果你需要序列化的对象包含 Optional 值，Jackson 库支持把 Optional 当作普通对象。也就是说，Jackson
+          会把空对象看作 null，而有值的对象则把其值看作对应域的值
+
+
+三：Map新增方法
+    3.1 put() 和 putIfAbsent() 以及 computeIfAbsent()
+        详细使用见 * [ MapInJava8.java ]
+        put()和 putIfAbsent()方法相同点:
+            如果当前key在map中没有值的话，会将key和value相关联，并且返回 null,代表原先值为空
+        不同点：
+            put():如果key原先有对应值的话，就会将以前的value给覆盖，然后返回原先的value，
+            putIfAbsent():如果key原先有对应值的话，那么当前value不会覆盖以前的value值，但是还是会返回原值
+
+        区别：putIfAbsent返回旧value或null，computeIfAbsent返回新的value
+
+        // java8之前。从map中根据key获取value操作可能会有下面的操作
+        Object key = map.get("key");
+        if (key == null) {
+            key = new Object();
+            map.put("key", key);
+        }
+
+        // java8之后。上面的操作可以简化为一行，若key对应的value为空，会将第二个参数的返回值存入并返回
+        Object key2 = map.computeIfAbsent("key", k -> new Object());
+
+
+四：stream      详细使用见 * [ StreamJava8.java ]
+    4.1：Stream的操作符大体上分为两种：中间操作符和终止操作符
+         4.1.1：中间操作符：
+            1> map(mapToInt,mapToLong,mapToDouble) 转换操作符，把比如A->B，这里默认提供了转int，long，double的操作符。
+            2> flatMap(flatmapToInt,flatmapToLong,flatmapToDouble) 拍平操作比如把 int[]{2,3,4} 拍平 变成 2，3，4 也就是从原来的一个数据变成了3个数据，这里默认提供了拍平成int,long,double的操作符。
+            3> limit 限流操作，比如数据流中有10个 我只要出前3个就可以使用。
+            4> distinct 去重操作，对重复元素去重，底层使用了equals方法。
+            5> filter 过滤操作，把不想要的数据过滤。
+            6> peek 挑出操作，如果想对数据进行某些操作，如：读取、编辑修改等。
+            7> skip 跳过操作，跳过某些元素。
+            8> sorted(unordered) 排序操作，对元素排序，前提是实现Comparable接口，当然也可以自定义比较器。
+
+
+        4.1.2：终止操作符
+            1> collect 收集操作，将所有数据收集起来，这个操作非常重要，官方的提供的Collectors 提供了非常多收集器，可以说Stream 的核心在于Collectors。
+            2> count 统计操作，统计最终的数据个数。
+            3> findFirst、findAny 查找操作，查找第一个、查找任何一个 返回的类型为Optional。
+            4> noneMatch、allMatch、anyMatch 匹配操作，数据流中是否存在符合条件的元素 返回值为bool 值。
+            5> min、max 最值操作，需要自定义比较器，返回数据流中最大最小的值。
+            6> reduce 规约操作，将整个数据流的值规约为一个值，count、min、max底层就是使用reduce。
+            7> forEach、forEachOrdered 遍历操作，这里就是对最终的数据进行消费了。
+            8> toArray 数组操作，将数据流的元素转换成数组。
+
+
+        总结：map() 和 peek() 区别
+            map 只能让当前对象转化为另外一个对象，如：
+                Stream.of(w,x,y)
+                		.map(e->e.getName())
+                		.forEach(System.out::println);
+
+            而 peek 可以让对象里面的方法进行转换，如：
+                Stream.of(w,x,y)
+                		.peek(e->e.setName(e.getName()+e.getAge()))
+                		.forEach(e-> System.out.println(e));
+
+五.函数接口
+    5.1：
+        //userList.forEach(user -> callBack.submit(user));
+            //如果接口不加 @FunctionalInterface 注解，不能通过函数调用
+            userList.forEach(callBack::submit);
+
+            //跟单个类似，只不过 -> 方法换成 {}，可以理解为里面就是一个方法，只不过是匿名的
+            userList.forEach(event -> {
+                System.out.println(event.getName()+event.getAge());
+          });
+
+    5.2:函数接口高级进阶,无参
+        public static void main(String[] args) {
+        		lambdaFunction(obj->countX(1));
+        }
+
+        protected static void lambdaFunction(Callback callback){
+        		//无需传参
+        		int count = (int) callback.submit(null);
+        		System.out.println("count="+count);
+        }
+
+        //FunctionalInterface 里面的 submit() 方法有返回参数，而submit()方法执行的就是我们自定义的方法，因此两边
+        	//的参数需要保持同步
+        	private static int countX(int x){
+        		return x+10;
+       	}
+
+    5.3：函数接口高级进阶,有参
+        public static void main(String[] args) {
+                //有参函数
+                lambdaFunctionHasArgs(param -> getList(param.getStart(),param.getEnd()));
+        }
+
+        private static List getList(Long start,Long end){
+            return new ArrayList();
+        }
+
+        private static void lambdaFunctionHasArgs(Callback<LimitParam> callback){
+            List result = (List) callback.submit(new LimitParam(0L,100L));
+        }
+
+
+
+
+
+
+
+

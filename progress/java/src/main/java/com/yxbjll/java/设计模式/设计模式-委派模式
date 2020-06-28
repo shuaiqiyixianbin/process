@@ -1,0 +1,46 @@
+一.数据映射是orm关系数据库的核心，基于此实现对象与数据映射：
+
+    //数据映射实现类实现一个增删改查的接口，当进行查找时：
+	final StudentDataMapper mapper = new StudentDataMapperImpl();
+			mapper.find();
+	final Optional<Student> studentToBeFound = mapper.find(student.getStudentId());
+	//find this.getStudents()实际数据应该是要从数据库里取出来的
+	public Optional<Student> find(int studentId) {
+		for (final Student student : this.getStudents()) {
+			if (student.getStudentId() == studentId) {
+				return Optional.of(student);
+			}
+		}
+		return Optional.empty();
+	}
+
+    理解：
+    都不需要从数据库映射成对应的实体，而是通过一个实现类mapper对实体或者id进行操作，从而操作数据库对应的
+    对象。相当于多了个中间层。
+
+二：delegation pattern(委派模式)
+
+    描述：两个类实现同一个接口，此时重写了接口所有的方法。这时在一个类里面用构造方法引入另外一个类，并把
+    它当做属性，然后调用该类的方法时，里面调用的是被委派的类的方法，使用多肽的方式传递类值：
+
+    接口：
+    void print(final String message);
+    被委派类：
+
+    public void print(String message) {
+      LOGGER.info("Canon Printer : {}", message);
+    }
+    委派类：
+
+    //各种使用多肽
+    private final Printer printer;
+    //通过构造方法引入被委派的·类，因此调用的都是被委派的类
+    public PrinterController(Printer printer) {
+      this.printer = printer;
+    }
+
+    public void print(String message) {
+      printer.print(message);
+    }
+    理解:通过这种委派形式，隐藏被委派类的具体实现与细节，貌似除了这个好处，其他还没看到
+

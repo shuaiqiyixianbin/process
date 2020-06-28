@@ -1,0 +1,57 @@
+//内含添加附件操作
+
+https://www.cnblogs.com/zj0208/p/5849866.html
+
+一：邮件发送使用 javax.mail 来操作。sea系统中是正确的，只是配置要改成：
+    #邮件发送参数
+    #mail.sender.account = 13451236248@163.com
+    mail.sender.account = 15292147382@163.com
+    #mail.sender.auth = ############
+    mail.sender.auth = yxbjll1234
+   该auth为 163邮箱的授权码。
+
+
+
+二：发送附件：附件地址就调用本地的地址就行了，然后会自己进行处理，传到网上去。在此过程中，一直出现
+    NullPointer的问题，因此进行记录。
+
+    public static void main(String[] args) {
+        MailSender mail = new MailSender();
+        mail.setMailTo("2991046032@qq.com");
+        //mail.setMailFrom("13451236248@163.com");
+        mail.setMailFrom("15292147382@163.com");
+        mail.setSMTPHost("smtp.163.com"); //smtp.qq.com
+        mail.setSubject("工单处理请求");
+        mail.setMsgContent("您有新的工单请注意查收！！！");
+        //发送附件(新增)
+        Vector<String> files = new Vector<String>();
+        files.add("E:\\pic\\someThing.mp4");
+        //files.add(new File("D:\\java\\keyword.txt"));
+        mail.setAttachedFileList(files);
+        try {
+            int num = mail.sendMail();
+            System.out.println("send flag:"+num);
+        } catch (IOException e) {
+            e.printStackTrace();
+        } catch (MessagingException e) {
+            e.printStackTrace();
+        }
+    }
+    fillMail方法中：
+
+    if (attachedFileList != null) {
+        for (Enumeration fileList = attachedFileList.elements(); fileList.hasMoreElements();) {
+            fileName = (String) fileList.nextElement();
+            MimeBodyPart mBodyPart = new MimeBodyPart();
+            // attach the file to the message
+            //String file2 = "E:\\pic\\mht.png";
+            //注意：此处不这样修改就会报错：空指针
+            String file2 = fileName;
+            FileDataSource fds = new FileDataSource(file2);
+            System.out.println("Mail发送的附件为："+messageBasePath + fileName);
+            mBodyPart.setDataHandler(new DataHandler(fds));
+            mBodyPart.setFileName(file2);
+            mPart.addBodyPart(mBodyPart);
+        }
+    }
+   

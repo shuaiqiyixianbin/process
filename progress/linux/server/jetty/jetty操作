@@ -1,0 +1,9 @@
+Jetty操作命令以及配置
+    一：日志配置（jetty自身日志）
+    在jetty目录下(bin同级目录下）
+    java -jar ./start.jar --add-to-start=console-capture,jvm  
+    java -jar  ./start.jar --add-to-start=logging-jetty
+
+    或者修改 start.ini中的配置，加上
+    --module=console-capture
+    --module-logging

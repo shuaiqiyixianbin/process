@@ -1,0 +1,2 @@
+spring=org.apache.dubbo.container.spring.SpringContainer
+custom=org.apache.dubbo.container.spring.CustomContainer

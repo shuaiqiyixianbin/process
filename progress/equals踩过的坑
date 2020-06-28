@@ -1,0 +1,43 @@
+一：equals() 是用来比较两对象的值是否相等
+    此类是所有Object子类都有的方法，但是不同类型的对象，实现的方式不一样
+
+    1.1 String
+      public boolean equals(Object anObject) {
+      			if (this == anObject) {
+      				return true;
+      			}
+      			if (anObject instanceof String) {
+      				String anotherString = (String) anObject;
+      				int n = value.length;
+      				if (n == anotherString.value.length) {
+      					char v1[] = value;
+      					char v2[] = anotherString.value;
+      					int i = 0;
+      					while (n-- != 0) {
+      						if (v1[i] != v2[i])
+      							return false;
+      						i++;
+      					}
+      					return true;
+      				}
+      			}
+      			return false;
+      		}
+
+      代码：anObject instanceof String 说明了，如果被比较的对象不是 String 就会直接返回false
+
+
+    2.Long
+        public boolean equals(Object obj) {
+            if (obj instanceof Long) {
+                return value == ((Long)obj).longValue();
+            }
+            return false;
+        }
+
+        每个对象数据类型重写equals()方法之后，实现细节都是不一样的，而long型equals()其他类型，如果这个
+        类型不是long型,那么总是返回false，只有Long.equal(Long.type)才可能会返回值
+
+        注：所以Long型数据跟int比较的时候，不能直接使用 equals() 比较值
+        也就是说在使用equals()比较的时候，只能是同类型的对象进行对比
+

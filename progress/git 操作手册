@@ -1,0 +1,4 @@
+1.线上代码回滚
+    git reset --hard commitId（版本号）
+    然后：
+    git push -f origin test(分支名)

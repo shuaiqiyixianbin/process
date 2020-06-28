@@ -1,0 +1,97 @@
+一：js操作
+    js 中数组array遍历 foreach
+    items 为数组
+    items.forEach(function(item, index){
+        console.info(item);
+        item.index = index+1;
+        // 如果是量表题，计算平均分
+        var t = 0, c=0;
+        if(item.itemType == 4){
+            item.optionList.forEach(function(element){
+                var count = element.count;
+                t += (parseInt(element.title)*count);
+                c += count;
+            });
+            var avg = (c > 0)? t/c : 0.0;
+            item.avg = avg.toFixed(1);
+        }
+    缺点：不能中断（比如中断之后执行某一操作），只能进行到底
+
+    javascript中获取时间，然后传到后台进行操作
+
+    /**
+     * 当使用ajax传递时间到后台时（有时不是在后台new Date()就能解决的），用此方法将本地时间格式（北京）转化为该date传递后台
+     */
+    var dateNow = new Date();
+    date = format(dateNow,'yyyy-MM-dd HH:mm:ss');
+    /**
+     * 这两个函数是为了得到前台的国际化时间，便于后台进行操作
+     */
+    var format = function(time, format) {   //前台获取时间，转化为国际时间，可以当做工具使用
+        var t = new Date(time);
+        var tf = function(i){return (i < 10 ? '0' : "") + i};
+        return format.replace(/yyyy|MM|dd|HH|mm|ss/g, function(a){
+            switch(a){
+                case 'yyyy':
+                    return tf(t.getFullYear());
+                    break;
+                case 'MM':
+                    return tf(t.getMonth() + 1);
+                    break;
+                case 'mm':
+                    return tf(t.getMinutes());
+                    break;
+                case 'dd':
+                    return tf(t.getDate());
+                    break;
+                case 'HH':
+                    return tf(t.getHours());
+                    break;
+                case 'ss':
+                    return tf(t.getSeconds());
+                    break;
+            }
+        })
+    }
+
+二：java操作
+        //这段非常重要，用于String与实体之间的数据不一致情况，非常有用
+        objectMapper = new ObjectMapper();
+        objectMapper.configure(DeserializationConfig.Feature.FAIL_ON_UNKNOWN_PROPERTIES, false);
+
+1.String 转为 List 
+    List<OrganTreeNode> nodeList = mapper.readValue(totalOrgan, new TypeReference<List<OrganTreeNode>>(){});
+   注意：该方法的实现需要对实体类（organTreeNode）构造一个无参构造
+
+2.String转对象
+    Item item = objectMapper.readValue(itemJsonObject.toString(), Item.class);
+
+3.List对象 转为 String
+    List<OrganTreeNode> organTreeNodes = organizationLogicInterface.organTreeData(); 
+   ObjectWriter objectWriter = new ObjectMapper().writer().withDefaultPrettyPrinter(); 
+   objectWriter.writeValueAsString(organTreeNodes);
+
+4.String[] 与List 数组之间的转换
+    https://blog.csdn.net/qq_33157666/article/details/77922945?locationNum=6&fps=1
+
+5.map 集合用法
+    https://blog.csdn.net/yen_csdn/article/details/52886677  map详解
+
+    存放：
+    Map<String, Long> map = new LinkedHashMap<String, Long>();
+    for(Object[] obj : countList){
+        Long value  = StringUtils.string2long(obj[0].toString(),0);
+        String key = StringUtils.string2long(obj[1].toString(),0)+"";
+        map.put(key,value);
+    }
+
+    读取：
+    for(int i=0;i<itemWrapperList.size();i++){
+        for (Map.Entry<String, Long> m :map.entrySet())  {
+            if(itemWrapperList.get(i).getItemId() == Long.parseLong(m.getKey())){
+                itemWrapperList.get(i).setTotalCount(Integer.parseInt(m.getValue().toString()));
+            }
+        }
+    }
+
+

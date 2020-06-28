@@ -1,0 +1,25 @@
+一：泛型本就是为了灵活方便的操作所有的类及其对象，因此在项目中使用它进行全局变量的操作，节省代码量。代码如下：
+
+    /**
+     * 此处需要传入 参数 log，目的是为了识别 T 具体是什么类型。否则只有返回以及转换的时候完全不知道T要被强转成哪个具体类型
+     * @param objectJson 需要被解析的json串
+     * @param log 某个类型的具体对象
+     * @param <T> 泛型
+     * @return
+     */
+    public static <T>T parseJsonToObject1(String objectJson,T log){
+        ObjectMapper mapper = new ObjectMapper();
+        DateFormat df = new SimpleDateFormat("yyyy-MM-dd HH:mm:ss");
+        mapper.setDateFormat(df);
+        try {
+            log = (T) mapper.readValue(objectJson,log.getClass());
+            return log;
+        } catch (IOException e) {
+            e.printStackTrace();
+        }
+        return null;
+    }
+    调用：
+
+    LearningLog log = parseJsonToObject1(value,new LearningLog());
+   

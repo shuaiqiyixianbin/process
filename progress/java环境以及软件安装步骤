@@ -1,0 +1,24 @@
+1.mysql数据库安装：
+https://jingyan.baidu.com/article/a3f121e4a6eb67fc9052bbf4.html
+
+2.redis下载以及安装：
+http://www.runoob.com/redis/redis-install.html
+
+使用cmd命令：
+redis-server --service-install redis.windows.conf --loglevel verbose
+把redis设置为一个windows服务
+
+3.windows10去除水印（暂时激活方法）:
+https://blog.csdn.net/qq_37084904/article/details/87529737
+
+4.jdk 1.8安装：
+https://blog.csdn.net/u012934325/article/details/73441617/
+
+5.tortoiseGit下载页面：
+https://tortoisegit.org/download/
+
+6.tortoiseGit安装：
+https://blog.csdn.net/bsfz_2018/article/details/79505929
+
+7.oracle下载以及安装：
+https://jingyan.baidu.com/article/cdddd41cc2ed9d53ca00e17a.html

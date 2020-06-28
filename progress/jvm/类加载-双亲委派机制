@@ -1,0 +1,36 @@
+
+详细介绍：https://blog.csdn.net/hellozhxy/article/details/82757489
+一：类加载器结构：
+
+    顶层类：BootStrapClassLoader：启动类加载器：  顶层类与下级类之间没有直接（继承、实现）关系。
+    二级类：ExtClassLoader ：扩展类加载器： 下级所有类加载器的父类
+    三级类： AppClassLoader 底级类：应用类加载器：一般使用自定义的类加载器，都是继承此类
+    以上类之间的继承关系都是通过组合的方式实现。
+
+二：双亲委派机制：
+    结构：只有顶级父类无需继承，其余子类都要继承一个父类。
+     定义：
+        当AppClassLoader加载一个class时，它首先不会自己去尝试加载这个类，而是把类加载请求委派给父类加载
+        器ExtClassLoader去完成。
+
+        当ExtClassLoader加载一个class时，它首先也不会自己去尝试加载这个类，而是把类加载请求委派给
+        BootStrapClassLoader去完成。
+
+        如果BootStrapClassLoader加载失败（例如在$JAVA_HOME/jre/lib里未查找到该class），会使用
+        ExtClassLoader来尝试加载；
+
+        若ExtClassLoader也加载失败，则会使用AppClassLoader来加载，如果AppClassLoader也加载失败，则会报
+        出异常ClassNotFoundException。         
+
+    以上就是双亲委派的原理，正是通过这种方式保证了系统级的类正确性。因为：即使是同一个class文件，通过不
+    同类加载器，加载到内存的字节码也不一样。因此需要限制类加载的正确性。一些系统级的类，如：
+    java.lang.String 类这种核心类，为了保证安全，只能通过 BootStrapClassLoader去加载，如果不这样操作，
+    自己可以新建此类，然后通过类加载器加载，就会导致安全问题。而现在类加载的话，会首先判断
+    appClassLoader是否加载过此类，如果没有就找extClassLoader是否加载过，以此类推，到
+    BootStrapClassLoader会发现，此类已经被加载过，因此不会继续加载。保证了某些系统级类的安全性。
+    同时也使的这些类跟随这些类加载器，而产生一种层级关系
+
+
+    当某个类加载器需要加载某个.class文件时，它首先把这个任务委托给他的上级类加载器，递归这个操作，如果上级
+    的类加载器没有加载，自己才会去加载这个类。
+

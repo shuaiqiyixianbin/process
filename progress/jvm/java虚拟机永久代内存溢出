@@ -1,0 +1,6 @@
+一：permgen space: 该方案只针对 tomcat容器：
+        直接用tomcat启动服务时，tomcat8只有85兆，很容易造成该类型溢出，jdk1.8好像不会出现该问题，因为已经
+        移除了该空间，
+        唯一解决方案：增大permgen space的内存大小：在tomcat的catalina.bat(windows 下)增加内存大小
+        见图：
+        修改方法区内存大小.png

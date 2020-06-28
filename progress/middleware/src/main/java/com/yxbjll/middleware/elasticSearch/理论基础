@@ -1,0 +1,190 @@
+                                    ElasticSearch基础原理
+一：es是分布式搜索引擎
+    1.1:基本概念：
+        存储数据的基本单位是索引，如存储订单数据，需在es中创建一个索引：order_idx,所有的订单数据都写到
+        这个索引里面。
+        注意：自带分布式协调能力，无需依赖 zookeeper，类似于 RedisCluster
+
+        结构：
+            index -> type -> mapping -> document -> field
+
+            近似类比：index为一个数据库，里面装了很多不同的type(表)，而映射(mapping)就是这个类型的表结构定义
+            (mysql 中创建一个表，肯定是要定义表结构的，里面有哪些字段，每个字段是什么类型),往index里的每一个type
+            里面写的一条数据叫做 document,相当于mysql中的一行，每个document有多个field，每个field代表了这个
+            document中的一个字段的值，只能说是类比，其实是不一样的（mapping types这个概念在ElasticSearch 7.X已被完全删除）
+
+    1.2:分布式存储
+        一个索引可以分割成多个shard，每个shard存储部分数据(类似于redisCluster以及kafka的每个分区的数据存储形式
+        都是分布式的数据存储)。
+
+        多个shard好处：
+            (1) 支持横向扩展：假设数据量为3T，3个shard，每个shard就1T的数据。若数据量增加到4T,就重新建一个有
+            4个shard的索引，将数据导进去。
+            (2) 提高性能：数据分布在多个shard，即多台服务器上，所有的操作都会在多台机器上并行执行，提高了防爆和性能
+            注意；
+            shard的数据实际有多个备份，就是说每个shard节点中都有一个primary shard,负责写入数据，但是还有几个replica
+            shard.primary shard写入数据之后，数据将会同步到其他几个replica shard
+
+            shard节点的replica shard存储逻辑跟 kafka broker上面存储 partition 以及 replica partition 的逻辑是
+            一致的。都是将多个shard或者partition分布在多台机器上，然后副本数据保存在其他的服务器（节点上），这样
+            就保证了某个节点故障，该节点对应的数据不至于丢失（该节点故障之后，对应的primary shard或者 partition的
+            也不能正常提供服务，此时其他节点上的副本会进行选举，从而选举出新的shard或者partition继续提供服务），
+            由此实现高可用
+
+            如果非master中断机器了。那么此上游上的primary shard不就没了。那好，master变为primary shard对应的
+            副本shard（在其他机器上）切换为如果停机机的机器修复了，修复后的例程也不再是。
+
+    1.3:document路由（primary shard数量不可变的原因在于hash算法）
+        一个index的数据会被存放到多个shard上，但是一个document的数据只会存在某一个具体的shard上，因此在数据保存
+        的时候，需要指定保存在哪个shard上。这个shard的选择就叫做document路由
+        算法；hash索引 shard = hash(routing) % number_of_primary_shards
+        document存放节点跟 primary shard的数据进行了绑定。因此如果新增或者删除shard的时候，所有的数据都需要重新
+        进行hash，然后重新保存到对应的shard中，这就限制了 primary shard的数量不可变
+
+    1.4:es写数据过程
+        (1)客户端选择一个node节点发送请求过去，这个node就是 coordinating node(协调节点)
+        (2)coordinating node对document进行路由，将请求转发给对应的node(有primary shard)实际的 node
+            上的 primary shard 处理请求，然后将数据同步到 replica node
+        (3)coordinating node 发现 primary node 和所有的 replica node都搞定之后，就返回响应结果给客户端
+
+
+    1.5：es读数据过程(通过 document id 进行数据读取)
+        (1)客户端发送请求到任意一个node，成为 coordinating node
+        (2)coordinating node 对 doc id进行哈希路由，将请求转发到相应的node，此时会使用 round-robin(随机轮询
+        算法)，在 primary shard 以及 其所有 replica 中随机选择一个，让读请求负载均衡
+        (3)接受请求的 node 返回document给 coordinating node
+        (4)coordinating node 返回 document给客户端
+
+    1.6：es搜索数据过程 (全文检索)
+        es最强大的是做全文检索，如下数据：
+            java真好玩儿啊
+            java好难学啊
+            j2ee特别牛
+        根据 java 关键词来搜索，将包含 java的 document 给搜索出来。es 就会给你返回：java真好玩儿啊，java好难学啊。
+
+    1.7：es写数据底层原理 【详情请见：es写入数据过程.png】
+        (1)数据先写入内存 buffer，在 buffer 中，数据是搜索不到的；同时将数据写入 translog 日志文件
+        (2)如果 buffer 快满了，或者到一定时间,就会将内存 buffer 数据 refresh 到一个新的 segment file中，但此时
+            数据不是直接进入 segment file 磁盘文件，而是先进入 os cache(高速缓存)，这个过程就是 refresh
+        (3)每隔1秒，es将 buffer 中的数据写入一个新的 segment file ，意味着 每秒钟会产生一个新的磁盘文件 segment file
+            这个 segment file 就存储最近 1s 内 buffer 中写入的数据
+        (4)如果 buffer 里面此时没有数据，不会执行 refresh 操作，如果 buffer 里面有数据，默认 1s 执行一次refresh
+            操作，刷入新的 segment file 中
+
+        概念说明：
+            1> os cache : 操作系统缓存。存在于操作系统、磁盘文件中。就是说数据写入磁盘文件之前，会先进入 os cache
+                先进入操作系统级别的一个内存缓存中去，只要buffer中的数据被 refresh 操作刷入 os cache 中，这个数据
+                就可以被搜索到
+            2> es准实时：NRT,全程 near real-time 。默认是 1s refresh 一次的，因为写入的数据 1秒之后才能被看到
+                所以es是准实时的。可以通过 es的 restful api 或者 java api,手动执行一次 refresh 操作，就是将
+                buffer中的数据刷入 os cache 中，让数据立马可以被搜索到。只要数据被输入 os cache中，buffer就会被清空。
+                数据在 translog 里面已经持久化到磁盘去一份了
+
+        (5)重复上面的步骤，新的数据不断进入 buffer 和 translog，不断将 buffer 数据写入一个又一个新的
+            segment file 中去，每次 refresh 完 buffer 清空，translog 保留。随着这个过程推进，translog 会变得
+            越来越大。当 translog 达到一定长度的时候，就会触发 commit 操作。
+
+        (6)commit操作发生第一步，就是将 buffer 中现有数据 refresh到 os cache中去，清空 buffer.然后将一个 commit
+            point 写入磁盘文件，里面标识着这个 commit point 对应的所有 segment file,同时强行将 os cache 中目前所有
+            的数据都 fsync(同步)到磁盘文件中，最后清空 现有 translog 日志文件。重启一个 translog,此时 commit 操作完成
+            这个 commit 操作叫做 flush, 默认 30分钟自动执行一次 flush.如果 translog 过大，也会触发。可以通过 es api
+            手动执行 flush 将 os cache 中的数据 fsync 强刷到磁盘上
+
+
+        translog日志文件作用：
+            执行 commit 操作之前，数据要么是停留在 buffer 中，要么停留在 os cache 中，都是内存，一旦故障，数据会丢失
+            所以需要将数据对应的操作写入一个专门的日志文件 translog 中，一旦宕机，再次重启的时候，es会自动读取 translog
+            日志文件中的数据，恢复到内存 buffer 和 os cache 中
+
+            有 5 秒的数据，停留在 buffer、translog os cache、segment file os cache 中，而不在磁盘上，此时如果宕机，
+            会导致 5 秒的数据丢失。
+
+        总结：
+            数据先写入内存 buffer，然后每隔 1s，将数据 refresh 到 os cache，到了 os cache 数据就能被搜索到（所以
+            才说 es 从写入到能被搜索到，中间有 1s 的延迟）。每隔 5s，将数据写入 translog 文件（这样如果机器宕机，
+            内存数据全没，最多会有 5s 的数据丢失），translog 大到一定程度，或者默认每隔 30mins，会触发 commit 操作，
+            将缓冲区的数据都 flush 到 segment file 磁盘文件中。
+            数据写入 segment file 之后，同时就建立好了倒排索引。
+
+
+
+    es数据搜索过程：【全文检索】
+        客户端发送请求到一个 coordinate node。
+        协调节点将搜索请求转发到所有的 shard 对应的 primary shard 或 replica shard，都可以。
+        query phase：每个 shard 将自己的搜索结果（其实就是一些 doc id）返回给协调节点，由协调节点进行数据的
+            合并、排序、分页等操作，产出最终结果。
+        fetch phase：接着由协调节点根据 doc id 去各个节点上拉取实际的 document 数据，最终返回给客户端。
+
+        写请求是写入 primary shard，然后同步给所有的 replica shard；
+        读请求可以从 primary shard 或 replica shard 读取，采用的是随机轮询算法。
+
+    分页性能优化：
+        es不像 mysql可以进行直接找到分页所需的数据，它会查找到所有的符合条件的数据，然后在 coordinating node
+        上进行数据的合并、排序、分页，这时候其实是对数据的一种过滤，本质还是查询的所有数据
+        因此每次调用相同条件进行分页的话，每次都会查询所有。效率很低
+        解决方案：
+            如果系统对数据实时的要求不是很严格，可以用 scroll,scroll会一次性的生成所有数据的一个快照，然后每次
+            翻页都是通过移动游标完成的。api只是在一页一页的往后翻
+
+
+
+
+
+    1.8：删除/更新数据底层原理
+         1.8.1:删除操作
+                commit 的时候会生成一个 .del 文件，将删除的 doc 标识为 deleted 状态，搜索的时候根据 .del
+                文件就知道这个 doc 是否被删除了
+         1.8.2:更新操作
+                将原来的 doc 标识为 deleted 状态，然后新写入一条数据
+
+         buffer每refresh一次，就会产生一个 segment file，所以默认是 1s一个 segment file，这样会越来越多，
+         此时会定期执行 merge，每次merge会将多个 segment file 合并成一个，同时这里会将标识为 deleted的doc
+         给物理删除掉，然后将新的segment file写入磁盘，这里会写一个 commit point ，标识所有新的 segment file
+         然后打开segment file 供搜索使用，同时删除旧的segment file
+
+    1.9：底层 lucene
+        简单来说，lucene 就是一个 jar 包，里面包含了封装好的各种建立倒排索引的算法代码。我们用 Java 开发
+        的时候，引入 lucene jar，然后基于 lucene 的 api 去开发就可以了。
+        通过 lucene，我们可以将已有的数据建立索引，lucene 会在本地磁盘上面，给我们组织索引的数据结构
+
+
+二：es 在数据量很大的情况下（数十亿级别）如何提高查询效率？
+    性能优化杀手锏：fileSystem cache
+        es写数据，实际都写到磁盘文件里面。查询的时候，操作系统会将磁盘文件里的数据自动缓存到 fileSystem cache
+        里面(相当于一个缓存中间件)。
+
+        client ---> shard ---> fileSystem cache ---> segment file
+
+    2.1：es第一次查询需要几秒，但是第二次就是毫秒级？
+        原因：第一次是从 磁盘文件进行数据查找，第二次是从 内存(fileSystem cache)中获取数据。相当于多个
+              redis.
+
+        es非常依赖底层的 fileSystem cache ,如果给 fileSystem cache 更多的内存，尽可能让内存容纳所有的
+        idx segment file 索引数据文件。搜索的时候基本都走内存，速度很快
+
+    2.2：优化实践
+            比如说你现在有一行数据。id,name,age .... 30 个字段。现在搜索，只需要根据 id,name,age 三个字段
+            来搜索。如果往 es 里写入一行数据所有的字段，就会导致说 90% 的数据是不用来搜索的，结果硬是占据
+            了 es 机器上的 filesystem cache 的空间，单条数据的数据量越大，就会导致 filesystem cahce 能
+            缓存的数据就越少。其实，仅仅写入 es 中要用来检索的少数几个字段就可以了，比如说就写入
+            es id,name,age 三个字段，然后你可以把其他的字段数据存在 mysql/hbase 里，
+            我们一般是建议用 es + hbase 这么一个架构。
+            hbase 的特点是适用于海量数据的在线存储，就是对 hbase 可以写入海量数据，但是不要做复杂的搜索，
+            做很简单的一些根据 id 或者范围进行查询的这么一个操作就可以了。从 es 中根据 name 和 age 去搜索，
+            拿到的结果可能就 20 个 doc id，然后根据 doc id 到 hbase 里去查询每个 doc id 对应的完整的数据，
+            给查出来，再返回给前端。
+            写入 es 的数据最好小于等于，或者是略微大于 es 的 filesystem cache 的内存容量。然后你从 es 检索
+            可能就花费 20ms，然后再根据 es 返回的 id 去 hbase 里查询，查 20 条数据，可能也就耗费个 30ms，
+            可能你原来那么玩儿，1T 数据都放 es，会每次查询都是 5~10s，现在可能性能就会很高，每次查询就是 50ms
+
+
+
+
+
+总结：redisCluster节点与 es shard(document路由)的选择算法对比
+      前面提到的 kafka 的document 的保存以及路由查找是采用hash(routing)算法，此算法有个弊端，就是不能随意对
+      已经存在的index进行primary shard的增删，否则会导致以前数据查找不到，间接导致数据丢失。
+
+      分析：为什么document会使用此种路由算法
+            因为primary shard 与其对应的 replica shard 不是保存在同一个服务器上，也就是说某个主节点故障了，
+            其对应的 副本(replica shard)是在另外一台服务器上，此时依旧可以找到数据，因此何种算法对其无影响

@@ -1,0 +1,53 @@
+一:区别(singleton,@Scope("prototype") ) 不同sessin也是如此
+
+SpringMVC和Struts2：
+    SpringMVC是基于方法的拦截，而Struts2是基于类的拦截。
+    对于Struts2来说，因为每次处理一个请求，struts就会实例化一个对象；这样就不会有线程安全的问题了;
+    而SpringMvc的controller（所有的bean）默认是Singleton的，这意味着每一个request过来，系统都会用原有的
+    instance去处理，这样导致两个结果：
+   1.是我们不用每次创建Controller。
+   2.是减少了对象创建和垃圾收集的时间;由于只有一个Controller的instance，当多个线程调用它的时候，它里面
+      的instance变量就不是线程安全的了，会发生窜数据的问题。
+
+   当然大多数情况下，我们根本不需要考虑线程安全的问题，比如dao,service等，除非在bean中声明了实例变量。
+   因此，我们在使用spring mvc 的contrller时，应避免在controller中定义成员变量。如：
+    private int total = 0;
+    function xx(){
+        //检验springmvc的controller默认生成确实是单实例
+        ++total;
+        logger.info("进来课程了"+total);
+    }
+
+    注意：对于这种情况是会有问题的。所以尽量避免实例变量的问题.，而对于普通的bean来说，如下所示：
+
+    /**
+     * 该方法解析影响性能，弃用
+     * 请使用 ：return Result.error(CodeMsg.SESSION_ERROR)，return Result.success(data);
+     * 或者：return new AjaxResult(true,types);
+     * @return
+     */
+    public String toJson(){
+        ObjectMapper mapper = new ObjectMapper();
+        try {
+            mapString = mapper.writeValueAsString(jsonMap);
+            count++;
+            log.info("现在count是："+count);
+            jsonMap.clear();
+        } catch (JsonProcessingException e) {
+            e.printStackTrace();
+        }
+        return mapString;
+    }
+    这里面的jsonmap是一个成员变量，项目中用该类作为一个基类实现一些通用的map封装等操作。问题来了，大并
+    发情况下即使用了clear()方法，数据也不对。因此说的springmvc的controller可能指的是所有的类。
+
+    分析：
+    在jvm中，class基本信息以及其常量池都加载在方法区。而方法区是所有线程共享的，因此如果一个类不是
+    用new class()的方法去存储数据，而是作为一个基类（不进行初始化）的话，此时的常量以及字段属性等都会是
+    存在方法区的常量池里面，这时所有的线程都可以访问，因此会产生改窜数据的问题。而为什么进行初始化后的数
+    据就没有这个问题？因为当我们使用如：class ajax = new Ajax();这种形式去初始化的时候，实例数据存在heap
+    中，而使用引用去编辑数据之后，其实数据本身还是在heap中，仅仅数据的类型在方法区，因为一个引用对应一个
+    heap的具体实例，每个实例又不会冲突，因此每个线程的同一个类的数据是完全不会互相影响的。因此在springmvc
+    中，只要不把一个类当成基类（大家公用）如：真正的controller因为只有一个，也不会调用new controller(),
+    就会导致窜数据，而只要通过new（）方式的都不需要考虑线程安全
+

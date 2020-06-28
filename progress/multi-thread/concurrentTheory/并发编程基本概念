@@ -1,0 +1,1240 @@
+序言：
+    序言1：
+    线程工作状态描述：
+        1.并发与并行：
+            并发是多个线程（任务）共同争夺一个cpu进行处理，并行是多个cpu各自处理对应的线程任务，现阶段都只是并
+            发而不是真正意义上的并行。
+        2.上下文切换：
+           即使单行处理器也支持多线程执行任务，cpu通过给每个线程分配cpu时间片来实现这个机制。时间片是cpu分配
+             给各个线程的时间，时间片非常短，所以cpu通过不停地切换线程执行，感觉像是多个线程同时执行，时间片一
+             般是几十毫秒，cpu通过时间片分配算法来循环执行任务,当前任务执行完一个时间片会切换到下一个任务。在
+             切换前会保存上一个任务的状态（程序计数器），以便下次切换回这个任务，可以再加载这个任务的状态，
+             所以任务从保存（切换那一刻）到再加载的过程就是一次上下文切换。
+        3.普通情况下的效率：
+             当并发执行累加操作不超过百万次时，速度会比串行执行累加操作要慢。这是因为线程有创建和上下文切换
+                的开销。
+        4. 如何减少上下文切换 ：
+             减少上下文切换的方法有无锁并发编程、CAS算法、使用最少线程和使用协程。
+                1.无锁并发编程。多线程竞争锁时，会引起上下文切换，所以多线程处理数据时，可以用一 些办法来避免使
+                用锁，如将数据的ID按照Hash算法取模分段，不同的线程处理不同段的数据。
+                2.CAS算法。Java的Atomic
+                包使用CAS算法来更新数据，而不需要加锁。
+                3.使用最少线程。避免创建不需要的线程，比如任务很少，但是创建了很多线程来处理，这 样会造成大量
+                线程都处于等待状态。
+                4.协程：在单线程里实现多任务的调度，并在单线程里维持多个任务间的切换
+        二：Java并发机制的底层实现原理
+             简介：Java代码在编译后会变成Java字节码，字节码被类加载器加载到JVM里，JVM执行字节 码，最终需要
+                转化为汇编指令在CPU上执行
+
+    序言2：
+    多线程常用方法：
+        2.1：Thread.Interrupt()中断方法：
+            interrupt()方法只是改变了线程的中断状态（改变中断标志位状态），至于中断状态改变后带来的结果无法
+            确定。有时它更是让停止中线程继续执行的唯一手段
+            执行一般逻辑的线程，如果调用了它的interrupt()方法，对线程没有任何影响。如 a.interrupt();并不会影
+            响a对象上运行的线程，但是中断标志会改为true,在其它线程里再次测试a的中断状态为true,但并不会停止这个
+            线程的行为。
+            对于wait中的等待notify、notifyAll唤醒新的线程，其实这个线程已经“暂停”执行，如果中断状态改变
+            （被迫中断），会抛出异常，这个InterruptedException异常不是线程抛出的，而是wait()方法，也就是对象
+            的wait()方法内部会不断检查在此对象上休息的线程状态，如果发现哪个线程的状态被置为已中断，则会抛出异
+            常，意思是这个线程不能再等待了，其意义就等同于唤醒它，然后执行catch中的代码。
+
+            总结：之所以要在已经调用了wait().sleep()等方法的线程上调用interrupt()方法让它从这几个方法的“暂停”
+            状态中恢复过来，包含两个目的：
+            1.可以使线程继续执行。 就是在catch语句中执行醒来后的逻辑，或由catch语句转回正常的逻辑。总之它使从
+             wait、sleep、join的暂停状态活过来了。
+            2.可以直接停止线程的运行。当然在catch中什么也不处理，或return，那么就完成了当前线程的使命，可以使
+            在上面“暂停”的状态中立即真正的“停止”。
+
+        2.2：Thread.join()方法：
+                1.如果作用在子线程中：
+                join是等待当前线程执行完之后，主线程才继续执行下去，在此过程中，其它线程和当前线程还是竞争关系
+
+        2.3：Thread.sleep()方法：
+                线程执行sleep()方法后，当前线程会休眠，但是其它线程还是会继续执行。如果主线程休眠，子线程继续执行
+                ，并且是竞争关系
+                注：sleep 只有调用了 interrupt()才会被唤醒，否则是不会出现异常的
+
+        2.4：wait以及notify(通知)：
+                都是Object的方法，如：Object.wait() ,当一个线程调用 object.wait()之后，会进入Object对象的等
+                待队列，当Object.notify()被调用后，会从这个等待队列中随机选取一个线程进行唤醒，而
+                notifyAll()会唤醒所有的线程
+
+                注意：wait、notify 方法不能随便调用，必须包含在对应的 synchronized 方法中！！！！原因：
+                    wait()方法会释放 Object 对象的锁（也就是 Monitor对象上的标识），而如果不用 synchronized
+                    获取该对象的锁的话，此时线程没有获取到该对象的锁，因此释放锁就会报错：
+                    （IllegalMonitorStateException），notify() 也一样。
+                通俗讲解：object.wait() 以及 object.notify() 锁的本质是相对于线程来说的，在一个线程中，通过
+                    synchronized获取到某一对象
+                    的锁，此时对象中的 Monitor头就保存了当前线程的信息。即当前线程获取到了此时对象的锁，在这种
+                    情况下，调用 wait()方法释放当前线程获取到的锁，而如果没有使用synchronized获取对象锁，就会
+                    导致异常发生，因为此线程没有monitor权限，因此报错。同理 notify()也一样。在wait()方法调用后
+                    线程会进入 object对象的等待队列（应该是多个对象获取到锁，然后都执行了wait()方法，此时就会
+                    有一个等待队列对应于该对象，可以使用notify()唤醒所有线程）
+
+                引申：该方法唤醒在此对象监视器上等待的单个线程。如果有多个线程都在此对象上等待，则会随机选择
+                    唤醒其中一个线程，对其发出通知notify()，并使它等待获取该对象的对象锁。注意“等待获取该对
+                    象的对象锁”，这意味着，即使收到了通知，wait的线程也不会马上获取对象锁，必须等待notify()
+                    方法的线程释放锁才可以
+
+                注意：wait()和notify()都要获取锁之后再执行，否则就会报错。因为notify唤醒之后如果获取不到锁也没意义
+                    使用详见；WaitAndNotifyTest.java
+                    使用notify()唤醒之后会直接执行 wait()方法后的代码！！！！！！！！！
+
+                使用如下：
+                public void interruptFlag() throws InterruptedException {
+                   Object object = new Object();
+                   Thread t = new Thread(){
+                      public void run(){
+                         synchronized (object){
+                            try {
+                               object.wait();
+                            } catch (InterruptedException e) {
+                               e.printStackTrace();
+                            }
+                         }
+                      }
+                   };
+                }
+
+    序言3：
+        守护线程和用户线程：
+            一般情况下，使用Thread等方法创建线程都是用户线程，当启动线程前，设置 thread.setDemon(true);
+            即可被设置为守护线程，垃圾回收就是典型的守护线程！
+　
+        其实在本质上，用户线程和守护线程并没有太大区别，唯一的区别就是会影响虚拟机的退出(程序的终止)。
+        当jvm中只剩下守护线程时，虚拟机会退出，即程序终止；而当jvm中至少拥有一个用户线程时，jvm都不会退出。
+
+
+一：锁定义
+    锁就是一种资源，用来保护共享资源数据安全（包括读写）的机制。
+
+二：synchronized关键字
+    将synchronized关键字作用地方不同，分为三类
+    1.指定加锁对象：对给定对象加锁，进入同步代码前要获得给定对象的锁
+    2.直接作用于实例方法：相当于对当前实例加锁，进入同步代码前要获得当前实例的锁
+    3.直接作用于静态方法：相当于对当前类加锁，进入同步代码前要获得当前类的锁
+
+
+三：ReentrantLock
+    1.ReentrantLock需要手动加锁以及释放锁（显示操作），因此灵活度高，但是要在退出临界区要释放锁，否则其它
+        线程也进入不了
+    2.ReentrantLock 可以中断响应：
+        对于synchronized，如果一个线程在等待锁，要么获得锁继续执行，要么保持等待，不能中途退出。而使用重
+        入锁则可以被中断。也就是在等待锁的过程中，程序可以根据需要取消对锁的请求。
+    3.限时锁：
+        在一定时间内尝试获取锁失败之后，即返回（不进行任何操作），方法Reentrant().tryLock(),如果
+        不带参数，当有线程获取到锁后就直接返回 true，否则立即返回false，不会进行等待，不会产生死锁。
+        代码见 #ThreadUtils.java
+    4.公平锁：
+        大多数情况下琐是不公平的。当线程a请求了锁1，线程b也请求了锁1，当锁1可用时，到底是先分配a还是b。
+        系统只会从等待队列中随机选取一个，不能保证其公平性。而公平锁就是为了保证先到先得，按照申请的时间
+        顺序进行锁的分配。不会产生饥饿。总会获取到资源。而synchronized则是非公平锁，利用
+        Public Reentrant(boolean fair);进行设置。
+       根据系统调度：一个线程会倾向于再次获取已经持有的锁，也就是说一个线程第一次获取了锁之后，下一次获
+        取锁的概率就相对来说大一点。这种方式很高效，但是是不公平的,而公平锁需要一个有序队列进行记录，非
+        常消耗系统资源。
+        建议：尽量别对公平锁进行设置，因为虚拟机会对锁进行一系列优化，包括偏向锁，设置后会影响系统效率
+    5.lock和lockInterruptibly 区别：
+        ReentrantLock.lockInterruptibly允许在等待时由其它线程调用等待线程的Thread.interrupt方法来中断等待
+        线程的等待而直接返回，这时不用获取锁，而会抛出一个InterruptedException。
+        ReentrantLock.lock方法不允许Thread.interrupt中断,即使检测到Thread.isInterrupted,一样会继续尝试获
+        取锁，失败则继续休眠。只是在最后获取锁成功后再把当前线程置为interrupted状态,然后再中断线程。
+
+
+四.ReadWriteLock 读写锁:
+    是读写分离锁。可以有效地帮助减少锁竞争，如几个读操作以及几个写操作之间都是会串行操作（因为共享资源使用重
+      入锁或者内部锁之后，只要对该资源进行操作都会锁获取，无论读写，除非是单独的只读数据，不需要进行锁定）而读
+      操作之间互相等待不合理,由此产生读写锁分离，使得读-读之间不进行锁的限制
+
+      //读写锁使用
+      		readWriteLock.readLock().lock();
+      		readWriteLock.readLock().unlock();
+
+      		readWriteLock.writeLock().lock();
+      		readWriteLock.writeLock().unlock();
+      注：当进行增删改的时候使用 WriteLock  ,查询的时候使用 ReadLock
+
+五：synchronized 与 ReentrantLock 对比：
+    两者都属于可重入锁（关于可重入锁，更详细见：https://blog.csdn.net/qq_29519041/article/details/86583945），
+    synchronized无需显式释放锁，Lock则需要显式释放锁。synchronized不可响应中断，Lock可以响应中断，并且可以
+    尝试获取锁，并添加时间，同时 ReentrantLock 还有其他高级功能，比如读写锁等等
+
+六：Condition 重入锁的好搭档：
+    condition对象通过调用方法实现和wait()以及notify()方法作用相同。但是 wait()和notify()都是和
+    synchronized 关键字合作使用。 而Condition是与重入锁相关联的。通过Lock接口的
+    Condition.newCondition()方法生成一个与当前重入锁绑定的condition实例。利用Condition对象，可以让线程
+    进行等待或者得到通知等。
+
+    方法：
+        await()
+            方法会使当前线程等待，同时释放锁，当其他线程中使用signal()或者signalAll()方法时，线程会
+            重新获得锁，并继续执行，或者线程被中断，也能跳出等待和Object.wait()方法相似
+
+       awaitUninterruptibly()
+            方法与 await()方法基本相同，但是不会在等待过程中响应中断。signal()方法用于唤醒一个在等待中
+            的线程。相对signalAll()会唤醒所有在等待的线程。和Object.notify()方法类似。
+    代码：
+    public class ThreadUtils implements Runnable {
+        public static ReentrantLock lock = new ReentrantLock();
+        public static Condition condition = lock.newCondition();
+
+        public void run() {
+            lock.lock();
+            try {
+                condition.await();
+                System.out.println("Thread is going on");
+            } catch (InterruptedException e) {
+                e.printStackTrace();
+            }finally {
+                lock.unlock();
+            }
+        }
+
+        public static void main(String[] args) throws InterruptedException {
+           ThreadUtils threadUtils = new ThreadUtils();
+           Thread t1 = new Thread(threadUtils);
+           t1.start();
+           Thread.sleep(7000);
+           //通知线程t1继续执行(加锁是为了防止共享资源冲突,因为线程唤醒),因为最开始的锁已经释放过了，此
+           //时共享资源未获取锁。
+            lock.lock();
+            condition.signal();
+           //唤醒一个线程，此时需要将共享资源的锁进行释放，否则唤醒了也获取不到锁，一直保持等待状态。
+            lock.unlock();
+        }
+
+    }
+
+    和Object().wait()和notify()方法一样，当线程使用Condition.await()时，要求线程持有相关的重入锁，
+    （没获取锁进行此操作会报错）在Condition.await()调用后，这个线程会释放这把锁。同理在
+    Condition.signal()方法调用时，也要求线程先获得相关的锁。在signal()方法调用后，系统会从当前Condition
+    对象的等待队列中，唤醒一个线程。一旦线程被唤醒，会重新尝试获得与之绑定的重入锁，成功获取继续执行，
+    因此在signal()方法调用之后，一般需要释放相关的锁。谦让给被唤醒的线程，否则唤醒了线程但也无法获得锁，
+    因此无法真正继续执行。
+
+七：信号量
+    允许多个线程同时访问。广义上是对锁的拓展，内部锁 synchronized 还是 ReentrantLock 一次只允许一个线程访问
+    一个资源，而信号量可以指定多个线程，同时访问某一个资源。构造函数：
+        public Semaphore(int permits);
+        public Semaphore(int permits,boolean fair);//指定准入数以及是否公平
+
+   在构造信号量对象时，必须指定信号量的准入数，即同时能申请多少个许可。当每个线程每次只申请一个许可时，这就相当
+    于指定了同时有多少个线程可以访问某一个资源
+    方法:
+        public void acquire();
+        public void acquireUninterruptibly();
+        public boolean tryAcquire();
+        public boolean tryAcquire(long timeout,TimeUnit timeUnit);
+        public void release();
+
+      acquire()方法尝试获得一个准入的许可，无法获得线程会等待，直到有线程释放一个许可或者当前线程被中断。
+       acquireUninterruptibly()不响应中断。tryAcquire()尝试获得一个许可，成功返回true不会等待，
+       release()用于在线程访问资源结束后，释放一个许可，使其他等待许可的线程可以进行资源访问。
+       代码案例：
+       public class ThreadUtils implements Runnable {
+           //指定数量，申明一个包含五个许可的信号量,意味着同时可以有五个线程同时访问同一代码
+           final Semaphore semaphore = new Semaphore(5);
+           public void run() {
+               try {
+                   semaphore.acquire();//尝试获取准入许可
+                   //模拟耗时操作
+                   Thread.sleep(2000);
+                   System.out.println(Thread.currentThread().getId()+":done");
+                   semaphore.release();
+               } catch (InterruptedException e) {
+                   e.printStackTrace();
+               }
+           }
+
+           public static void main(String[] args) throws InterruptedException {
+               ExecutorService exec = Executors.newFixedThreadPool(20);//产生固定数量线程的线程池
+               final ThreadUtils threadUtils = new ThreadUtils();
+               for (int i=0;i<20;i++){
+                   exec.submit(threadUtils);
+               }
+           }
+       }
+       注：会看到此20个线程打印呈四组打印，每组5条log(5个一组输出)
+
+八：倒计时器 CountDownLatch
+        countDownLatch是一个实用的多线程控制工具类。又称为倒计时器，通常用来控制线程等待，可以让一个线程等待直
+        到倒计时结束，再开始执行。
+        解释：
+            也就是一个任务在开始之前要等待一系列准备条件完成时，然后再开始执行，如火箭发射要进行各种仪器检查无
+            误之后才能进行发射操作，而这个等待过程就是倒计时器的操作原理。
+            其实就是使用多少个线程共同完成某一件事之后再执行接下来主线程的代码，有时可以当做 join()方法用
+        使用案例:
+            CountDownLatchDemo.java
+            解析：countDown()用于通知countDownLatch,一个线程已经完成了任务，倒计时器可以减一了。方法
+            countDownLatch.await();要求主线程等待所有10个检查任务全部完成，只有任务都完成了，主线程才继续执行。
+
+九：循环栅栏 cyclicBarrier
+        cyclicBarrier 是一种多线程并发控制实用工具。和 CountDownLatch 类似，也可以实现线程间的技术等待，比
+        countDownLatch更强大
+        之所以叫做循环栅栏，是因为可以循环技术，比如凑齐一次之后，计数器回归零，接着凑齐下一批
+
+十：线程阻塞工具类：LockSupport
+        是一个实用的线程阻塞工具，可以在线程内任意位置让线程阻塞，和Thread.suspend()相比，弥补了由于resume()
+        在前发生，导致线程无法继续执行的情况。和 Object.wait()相比，不需要获取对象的锁，也不会抛出 interrupted
+        Exception异常。
+        LockSupport的静态方法 park()可以阻塞当前线程，类似还有parkNanos()、parkUntil()等方法，实现了一个限
+        时等待。
+        public class ThreadUtils {
+            public static Object u = new Object();
+            static ChangeObjectThread t1 = new ChangeObjectThread("t1");
+            static ChangeObjectThread t2 = new ChangeObjectThread("t2");
+
+            public static class ChangeObjectThread extends Thread{
+                public ChangeObjectThread(String name){
+                    super.setName(name);
+                }
+
+                public void run(){
+                    synchronized (u){
+                        System.out.println("in "+getName());
+                        LockSupport.park();
+                    }
+                }
+            }
+
+            public static void main(String[] args) throws InterruptedException {
+                t1.start();
+                Thread.sleep(100);
+                t2.start();
+                LockSupport.unpark(t1);
+                System.out.println("释放t1");
+                LockSupport.unpark(t2);
+                t1.join();
+                t2.join();
+            }
+        }
+
+        使用park()阻塞住了线程，只有使用unpark()解除阻塞之后，其他线程才能进入。
+        使用场景: 在需要明确阻塞线程，并且何时解除阻塞的情况下，可以使用此工具类，不需要获取锁以及报错！！！
+
+十一：线程池
+        线程池工厂方法；
+            public static ExecutorService newFixedThreadPool(int nThreads);
+            public static ExecutorService newSingleThreadExecutor();
+            public static ExecutorService newCachedThreadPool();
+            public static ScheduledExecutorService newSingleThreadScheduledExecutor();
+            public static ScheduledExecutorService newScheduledThreadPool(int corePoolSize);
+
+        运行原理解析：
+            如果当前池大小 poolSize 小于 corePoolSize ，则创建新线程执行任务。
+            如果当前池大小 poolSize 大于 corePoolSize ，且等待队列未满，则进入等待队列
+            如果当前池大小 poolSize 大于 corePoolSize 且小于 maximumPoolSize ，且等待队列已满，则创建新线程执行任务。
+            如果当前池大小 poolSize 大于 corePoolSize 且大于 maximumPoolSize ，且等待队列已满，则调用拒绝策略来处理该任务。
+            线程池里的每个线程执行完任务后不会立刻退出，而是会去检查下等待队列里是否还有线程任务需要执行，
+            如果在 keepAliveTime 里等不到新的任务了，那么线程就会退出。
+
+        解析：
+            newFixedThreadPool()方法：该方法返回一个固定线程数量的线程池。该线程池中的线程数量始终不变，当有
+            一个新任务提交时，线程池中若有空闲线程，则立即执行，若没有，新任务会被暂存在一个任务队列中，待有
+            线程空闲时，便处理在任务队列中的任务
+
+            newSingleThreadExecutor()方法：该方法返回一个只有一个线程的线程池。若多余一个任务被提交到线程池，任务
+            会被保存在一个任务队列中，待线程空闲，按先入先出的顺序执行队列中的任务。
+
+            newCachedThreadPool()方法：该方法返回一个可根据实际情况调整线程数量的线程池，线程数量不确定。但
+            若有空闲线程可以复用，会优先使用可复用的线程。若所有线程均在工作，又有新的任务提交，则会创建新的
+            线程处理任务。所有线程在当前任务执行完毕后，将返回线程池进行复用。
+
+            newSingleThreadScheduledExecutor()方法：该方法返回一个 ScheduledExecutorService 对象，线程池
+            大小为 1。ScheduledExecutorService 接口在 ExecutorService 接口之上拓展了在给定时间执行某任务
+            的功能。如固定延时或者周期性执行任务
+
+            newScheduledThreadPool()方法：该方法也返回一个 ScheduledExecutorService 对象，但该线程池可以
+            指定线程数量。
+
+            Executors 总结：只是一个在 ThreadPoolExecutor 上进行的一个封装框架，减少了使用复杂性。但是不推荐使用此框架进行线程池创建
+            ，最好使用 Executors.new ThreadPoolExecutor()方法，可以清楚地知道内部构造。多线程插入数据库案例：zhiyu项目
+
+            Date startDate = new Date();
+            //自定义ThreadFactory,便于设置名字
+            ExecutorService executorService = new ThreadPoolExecutor(5,5,0L, TimeUnit.SECONDS
+                                                        ,new ArrayBlockingQueue<Runnable>(6));
+            int x = 10000/10;
+            int k;
+            //执行提交所有任务
+            for (int i=0;i<10;i++){
+                k = x*i;
+                executorService.submit(new ThreadUtils.MultiThreadSaveMysql(k,k+x));
+            }
+            //任务提交之后关闭线程池，此方法不是立即关闭线程池，而是不接受新的任务，旧任务依旧会执行
+            executorService.shutdown();
+            while (true){
+                //判断线程池是否关闭：isTerminated()方法只有在之前调用了shutdown()并且任务都完成之后才会返回true
+                if (executorService.isShutdown() && executorService.isTerminated()){
+                    break;
+                }else {
+                    System.out.println("正在运行中。。。。。。");
+                }
+            }
+            long wasteTime = 0;
+            Date endDate = new Date();
+            wasteTime = endDate.getTime()-startDate.getTime();
+            //单线程情况下耗时 237s 开启四个线程 38s
+            System.out.println("耗时："+wasteTime/1000);
+
+            Runnable :
+            /**
+             * 进行多线程保存数据库操作
+             */
+            public static class MultiThreadSaveMysql implements Runnable {
+                private int index;
+                private int start;
+                public MultiThreadSaveMysql(int start,int index){
+                    this.start = start;
+                    this.index = index;
+                }
+                @Override
+                public void run() {
+                    for (Integer i=start;i<index;i++){
+                        LearningLog log = new LearningLog();
+                        log.setChapterId(950L);
+                        log.setCourseWareId(501L);
+                        log.setDuration(50L);
+                        log.setIp("127.0.0.1");
+                        log.setStartTime(new Date());
+                        log.setStudentId("yxb");
+                        threadUtils.learningLogRepository.save(log);
+                    }
+                }
+            }
+
+
+        注：线程池的使用最好自己手动创建，使用Executors 的方法会产生实际生产问题
+
+        备注1：
+            submit() 和 execute() 之间的区别：
+              1.接收参数不一样,submit()可以提交 Runnable 和 Callable ，而 execute()只能提交 Runnable 任务
+              2.submit()有返回值，而 execute()没有，无论 submit() 提交 Runnable 还是 Callable 任务，
+                都会有返回值，execute() 则没有返回值
+              3.submit()方便处理 exception 处理
+                    如果task 里面会抛出 checked 或者 unchecked exception,同时希望调用者能感知并及时作出处理
+                    就需要用到 submit,通过捕获 Future.get抛出的异常
+                例如：
+                    Future future = pool.submit(new RunnableTest("Task2"));
+                            try {
+                                if(future.get()==null){//如果Future's get返回null，任务完成
+                                    System.out.println("任务完成");
+                                }
+                            } catch (InterruptedException e) {
+                            } catch (ExecutionException e) {
+                                //否则我们可以看看任务失败的原因是什么
+                                System.out.println(e.getCause().getMessage());
+                            }
+
+                            public void run() {
+                                System.out.println("Inside "+taskName);
+                                throw new RuntimeException("RuntimeException from inside " + taskName);
+                            }
+                解析：通过对 Future.get 来进行异常捕获。如果 run()方法确实没有返回值，get 会返回 null
+                    结论
+                    1、submit在执行过程中与execute不一样，不会抛出异常而是把异常保存在成员变量中，在FutureTask.get
+                        阻塞获取的时候再把异常抛出来。
+                    2、Spring的@Schedule注解的内部实现就是使用submit，因此，如果你构建的任务内部有未检查异常，
+                        你是永远也拿不到这个异常的。
+                    3、execute直接抛出异常之后线程就死掉了，submit保存异常线程没有死掉，因此execute的线程池可能
+                        会出现没有意义的情况，因为线程没有得到重用。而submit不会出现这种情况。
+
+
+
+
+十二：Fork/Join 框架
+        实现的是 分而治之的思想：将一项任务分成多个执行过程进行，最后将结果整合。Linux通过fork()创建子进程。
+        而Join()代表等待。也就是分为多个小任务，等待知道任务全部完成后，再整合结果
+
+        线程池中，大多情况下一个线程需要执行多个任务，每个线程必然需要一个队列。当一个线程执行完自身任务后，
+        会帮其它线程执行任务，从其他线程队列中拿任务处理。从任务队列底部拿数据，而线程执行自己任务是从顶部
+        开始拿，避免数据竞争
+
+        ForkJoin 重要接口：
+            public <T> ForkJoinTask<T> submit(ForkJoinTask<T> task)
+            你可以向ForkJoinPool线程池提交一个ForkJoinTask任务。所谓ForkJoinTask任务就是支持fork()分解以
+            及join()等待的任务。
+            ForkJoinTask有两个重要的子类，
+            RecursiveAction和RecursiveTask.分别表示没有返回值的任务和可以携带返回值的任务
+
+            代码：
+            /**
+             * forkJoin框架案例
+             */
+            public class ThreadUtils extends RecursiveTask<Long> {
+                private static final int THRESHOLD = 10000;
+                private long start;
+                private long end;
+
+                public ThreadUtils(long start,long end){
+                    this.start = start;
+                    this.end = end;
+                }
+
+
+                protected Long compute() {
+                    long sum = 0;
+                    boolean canCompute = (end -start)<THRESHOLD;
+                    if (canCompute){
+                        for (long i=start;i<=end;i++){
+                            sum+=i;
+                        }
+                    }else {
+                        //分成100个小任务
+                        long step = (start+end)/1000;
+                        ArrayList<ThreadUtils> subTasks = new ArrayList<>();
+                        long pos = start;
+                        for (int i=0;i<100;i++){
+                            long lastOne = pos+step;
+                            if (lastOne>end) lastOne=end;
+                            ThreadUtils subTask = new ThreadUtils(pos,lastOne);
+                            pos+=step+1;
+                            subTasks.add(subTask);
+                            subTask.fork();
+                        }
+                        for (ThreadUtils t : subTasks){
+                            sum+=t.join();
+                        }
+                    }
+                    return sum;
+                }
+
+
+                public static void main(String[] args){
+                    ForkJoinPool forkJoinPool = new ForkJoinPool();
+                    ThreadUtils task = new ThreadUtils(0,200000L);
+                    ForkJoinTask<Long> result = forkJoinPool.submit(task);
+                    try {
+                        long res = result.get();
+                        System.out.println("sum="+res);
+                    } catch (InterruptedException e) {
+                        e.printStackTrace();
+                    } catch (ExecutionException e) {
+                        e.printStackTrace();
+                    }
+                }
+            }
+
+
+第二部分：
+    并发容器
+        2.1 构造线程安全的Map:使用代理模式，从原map中获取数据，其本身只是作为一个加锁的工具
+        public static Map map = Collections.synchronizedMap(new HashMap());
+      上述案例 返回 SynchronizedMap，而其实现方法就是使用mutex锁进行 synchronized锁定。方法都要获取锁操
+       作，性能不高。
+
+       专业的并发HashMap是ConcurrentHashMap.性能优异。
+
+    2.2 List的线程安全：
+         //此时的List对象就是线程安全的
+       public static List<String> l = Collections.synchronizedList(new LinkedList<String>);
+
+    2.3 高效读写的队列： ConcurrentLinkedQueue
+            队列 Queue: 链表实现
+            节点定义：private static class Node<E>{
+                        volatile E item;
+                        volatile Node<E> next;
+                    }
+
+            底层：使用比较交换法进行安全读写操作，并发效率高
+            具体结构见：ConcurrentQueue.png
+
+    2.4 高效读取：不变模式下的 CopyOnWriteArrayList
+            很多应用场景中，读操作可能会远远大于写操作，由于读操作不会修改原有的数据，因此加锁浪费。此类读
+            取是完全不用加锁的，写入也不会阻塞读取操作。
+            CopyOnWrite 就是在写入操作时，进行一次自我复制，当这个List需要修改时，并不修改原有内容（对于
+            保证当前在读线程的数据一致性非常重要），而是对原有数据进行一次复制，将修改内容写入副本中，写完
+            之后，再将修改完的副本替换原来的数据。这样就可以保证写操作不会影响读了。    
+        读取实现：
+            private volatile transient Object[] array;
+            public E get(int index){
+                return get(getArray(),index);
+            }
+            final Object[] getArray(){
+                return array;
+            }
+            private E get(Object[] a,int index){
+                return (E) a[index];
+            }
+        注：读取代码没有任何同步控制和锁操作，因为内部数组array不会发生修改，只会被另外一个array替换，因此
+        可以保证数据安全。
+
+    写入操作：
+        public boolean add(E e){
+            final ReentrantLock lock = this.lock;
+            lock.lock();
+            try{
+                Object[] elements = getArray();
+                int len = elements.length;
+                Object[] newElements = Arrays.copyOf(elements,len+1);
+                newElements[len] = e;
+                setArray(newElements);
+                return true;
+            }finally{
+                lock.unlock();
+            }
+        }
+   写入操作使用重入锁，用于限制写-写情况。第七行，进行了内部元素的完整复制。会生成一个新的数组newElements
+    ,将新元素加入newElements。接着第九行，使用新的数组替换老的数组，修改就完成了。整个过程不会影响读取，
+    读取线程可以立即察觉到这个修改（因为array变量是volatile类型------>读写操作没有进行锁的限制，使用volatile
+    可以多线程情况下进行全局可见，同时保证读取数据是最新的）
+
+    分析：之所以高效读取是因为读取过程没有设置锁，但是写操作使用了锁，因此写性能不太好。
+    理解:如果添加一个元素就重新新建一个数组，会不会内存消耗太大，频繁操作会极大影响效率？？？？
+
+
+    2.5 数据共享通道：BlockingQueue
+           思考：多线程开发模式还会引入一个问题，就是如何进行多个线程间的数据共享。比如线程a希望给b发一个消息
+            ，用什么方式通知？
+         
+           共享通道BlockingQueue相当于一个“邮箱”，中间介质，有利于解耦。
+        BlockingQueue 几种实现：
+            ArrayBlockingQueue
+            LinkedBlockingQueue
+            DelayedWorkQueue
+            DelayQueue
+            ......
+
+        ArrayBlockingQueue 和 LinkedBlockingQueue :
+            ArrayBlockingQueue基于数组实现，适合做有界队列。因为队列中可容纳的最大元素需要在队列创建时指定
+            （数组动态拓展不方便）
+            LinkedBlockingQueue基于链表实现，适合做无界队列。或者那些边界值非常大的队列。因为其内部元素可
+            以动态增加。不会因为初值容量很大，导致非常消耗内存。
+
+        思考：
+            BlockingQueue之所以适合作为数据共享的通道。关键在Blocking(阻塞)上。当消费线程（不断获取队列中的
+            消息，进行处理的线程，也就是执行任务的线程）。当处理完成后，如何知道下一条消息何时到来？
+                解决：1 让这个线程按照一定的时间间隔不停地循环和监控这个队列。（如把任务放入redis，然后起
+                一个定时任务，定时执行），但这样造成了不必要的资源浪费。
+                BlockingQueue会让消费线程在队列为空时，进行等待，当有新的消息进入队列后，自动将线程唤醒。
+
+        工作模式：空队列--->读取等待     满队列--->写入等待
+
+        分析：
+             ArrayBlockingQueue:内部元素放置在一个对象数组中：
+               final Object[] items;
+               
+            向队列中压入元素可以使用offer()和put()方法。对于offer()，如果当前队列已经满了，会立即返回
+                 如果没有满，则执行正常的入队操作。put()方法是将元素压入队列末尾，如果队列满了，会一直等待
+                 。直到队列中有空闲的位置
+
+            从队列中弹出元素可以使用poll()方法和take()方法，都是从队列头部获得一个元素。不同之处在于：
+                如果队列为空 poll()方法直接返回null,而take()方法会等待，直到队列中有可用元素。
+
+        代码分析：
+            put()方法和take()方法是体现Blocking的关键。为了做好等待和通知两件事，在ArrayBlockingQueue内部
+            定义了以下字段
+                /** Main lock guarding all access */
+                final ReentrantLock lock;
+
+                /** Condition for waiting takes */
+                private final Condition notEmpty;
+
+                /** Condition for waiting puts */
+                private final Condition notFull;
+
+            当执行take()操作时，如果队列为空，则让当前线程进行等待，如果不为空，则进行一次notEmpty 上的通知
+            public E take() throws InterruptedException {
+                    final ReentrantLock lock = this.lock;
+                    lock.lockInterruptibly();
+                    try {
+                        while (count == 0)
+                            notEmpty.await();
+                        return dequeue();
+                    } finally {
+                        lock.unlock();
+                    }
+            }
+
+            同理：对于put()操作也是一样。队列满时，需要让压入线程等待：
+              public void put(E e) throws InterruptedException {
+                    checkNotNull(e);
+                    final ReentrantLock lock = this.lock;
+                    lock.lockInterruptibly();
+                    try {
+                        while (count == items.length)
+                            notFull.await();
+                        enqueue(e);
+                    } finally {
+                        lock.unlock();
+                    }
+                }
+
+
+附加：ConcurrentHashMap 1.7 和 1.8 区别
+    前缀：Map实现方式：数组 Entry + 链表，根据 hashCode生成在 entry中的位置（index）,如果hashCode相同就以第一个
+          元素为 head 生成 链表
+
+    1.7中的concurrentHashMap实现
+          由16个 Segment（段）组成，Segment类似于HashMap的结构，内部拥有一个Entry数组,数组中的每一个元素又是一个
+          链表.Segment extends ReentrantLock，因此它是一个 ReentrantLock
+          也就是说，concurrentHashMap 使用分段锁技术（减小锁粒度），将数据分为一段段，每一段一把锁，当一个线程占用
+          其中一个锁的时候，其它段也能被其他线程访问到，实现真正并发
+          size()方法，将返回 其有效表项的数量，即全部有效表项之和。需要取得所有子段的锁，size()方法并不总是这样执行
+          ，size()方法会先使用无锁的方式求和，失败才会尝试这种加锁的方法，但是高并发场景下ConcurrentHashMap的
+          size()性能依然要差于同步的HashMap
+
+               图示：
+                              _ Segment ----- 数组  ------单个元素 -----> 链表
+                             |_ Segment ----- 数组  ------单个元素 -----> 链表
+                             |_ Segment ----- 数组  ------单个元素 -----> 链表
+          concurrentHashMap  |_ Segment ----- 数组  ------单个元素 -----> 链表
+                             |_ Segment ----- 数组  ------单个元素 -----> 链表
+                             |_ Segment ----- 数组  ------单个元素 -----> 链表
+
+          总结：ConcurrentHashMap定位一个元素的过程需要进行两次Hash操作。
+               第一次Hash定位到Segment，第二次Hash定位到元素所在的链表的头部
+
+
+    1.8中的 concurrentHashMap 实现：
+                class Node<K,V> implements Map.Entry<K,V> {
+                      final int hash;
+                      final K key;
+                      volatile V val;
+                      volatile Node<K,V> next;
+                      //... 省略部分代码
+                }
+          Node：保存key，value及key的hash值的数据结构。其中value和next都用volatile修饰，保证并发的可见性。
+          注：Java8 ConcurrentHashMap结构基本上和Java8的HashMap一样，不过保证线程安全性。
+          其实可以看出JDK1.8版本的ConcurrentHashMap的数据结构已经接近HashMap，相对而言，ConcurrentHashMap只是增加了同步的操作来控制
+          并发，从JDK1.7版本的ReentrantLock+Segment+HashEntry，到JDK1.8版本中synchronized+CAS+HashEntry+红黑树。
+
+          1.数据结构：取消了Segment分段锁的数据结构，取而代之的是数组+链表+红黑树的结构。
+          2.保证线程安全机制：JDK1.7采用segment的分段锁机制实现线程安全，其中segment继承自ReentrantLock。
+            JDK1.8采用CAS+Synchronized保证线程安全。
+          3.锁的粒度：原来是对需要进行数据操作的Segment加锁，现调整为对每个数组元素加锁（Node）。
+          4.链表转化为红黑树:定位结点的hash算法简化会带来弊端,Hash冲突加剧,因此在链表节点数量大于8时，会将链表转化
+            为红黑树进行存储。
+          5.查询时间复杂度：从原来的遍历链表O(n)，变成遍历红黑树O(logN)。
+
+
+第三部分：锁及其优化
+        一：提高锁性能
+             1.1 ：减少锁持有时间：也就是锁住的方法或者资源越少越好。这样不需要同步，可以被多个线程执行
+                    ，而只需要在资源上花费锁消耗资源。
+
+              1.2：减小锁粒度：典型案例是 ConcurrentHashMap类的实现，对于HashMap来说，最重要的两个方法
+                    就是get()和put().一种最自然的想法就是对整个HashMap加锁，可以得到一个线程安全的对象。比
+                    如SynchronizedHashMap();此时可以认为加锁粒度太大。对于ConcurrentHashMap，内部进一步细
+                    分了若干个小的HashMap,称之为段（SEGMENT）.默认一个ConcurrentHashMap被分为16个段。
+                如果需要在ConcurrentHashMap中增加一个新的表项，而不是将整个HashMap加锁，而是先根据
+                    hashcode得到该表项应该被存放到那个段，然后对该段加锁，并完成put()操作，在多线程环境中，
+                    如果多个线程同时进行put()操作，只要被加入的表项不存放在同一个段中，则线程间便可以做到真
+                    正的并行。
+
+                 1.3：读写分离锁来替换独占锁：读写锁则是对系统功能点的分割，通过功能上的不同实现来减少锁粒度。
+                     典型的读写锁 ReadWriteLock,读取之间的操作使用读锁，写-写、写-读之间使用 写锁
+
+                 1.4：锁分离：在LinkedBlockingQueue实现中，take()函数和put()函数分别实现了从队列中获得数据和往队列中
+                       增加数据的功能。虽然这两个函数都对当前队列进行了修改操作，但由于LinkedBlockingQueue是基于链表的
+                       ，因此，两个操作分别作用于队列的前端和尾端，不冲突。如果使用独占锁，操作会等待对方释放锁资源。
+
+                       把独占锁分为了 takeLock和putLock.分别在take()操作以及put()操作中使用。因此 take()函数和
+                       put()函数相互独立。只需要在take()和take()间，put()和put()间分别对  takeLock  和 
+                       putLock  进行竞争。
+                       Lock.lock()不响应中断，一直等待，而 Lock.lockInterruptibly()响应其它线程的Thread.
+                       interrupte()方法，会进行中断。不等待
+
+                       锁分离总结：把原先的独占锁进行了区分，因为读写操作是不会有资源冲突的，如果读写锁都要进行阻
+                       塞的话，会很消耗锁资源，因此把一个容器的锁分为读写锁或者根据功能对其进行分离：因为
+                       linkedList获取是从头部，而添加是从尾部，因此读写时候进行锁分离，分为 putLock()以及
+                        take()锁，相互区分，极大地节省了资源。
+
+                 1.5：锁粗化
+                      如果对同一个锁不停地进行请求、同步和释放，也会消耗系统宝贵的资源。为此，虚拟机在遇到一连串连
+                      续地对同一锁不断进行请求和释放的操作时，便会把所有的锁整合成对锁的一次请求，减少对锁的请求同
+                      步次数，又叫做锁的粗化
+                      在开发中，要有意识的在合理的场合进行锁的粗化。尤其在循环内请求锁（就和循环中进行事务获取以及
+                      提交一样）。频繁操作锁极大地浪费了资源。
+        二：jvm对锁的优化：
+                2.1 偏向锁：
+                        核心思想：如果一个线程获得了锁，锁就进入偏向模式。当这个线程再次请求锁时，无需再做任何
+                        同步操作。节省了有关锁申请的操作。对于几乎没有锁竞争的场合，偏向锁有比较好的优化效果，因为
+                        连续多次极有可能是同一个线程请求相同的锁。对于锁竞争激烈的场合，效果不佳。因为每次都是不同
+                        的线程请求锁，偏向模式失效；
+               2.2 轻量级锁：
+                        如果偏向锁失败，虚拟机不会立即挂起线程，会使用轻量级锁的优化手段。只是简单地将对象头
+                        部作为指针，指向持有锁的线程堆栈的内部。来判断一个线程是否持有对象锁。如果线程获得轻量级锁
+                        成功，可以顺利进入临界区。失败，则表示其他线程抢先夺到了锁，当前线程的锁请求会膨胀为重量级
+                        锁。
+               2.3 自旋锁：
+                        锁膨胀后，虚拟机为了避免线程真实的在操作系统层面挂起，虚拟机还会再做最后的努力----
+                        自旋锁。由于当前线程无法获得锁，也不知道什么时候会获得锁。因此粗暴的挂起线程可能得不偿失。
+                        因此，系统会进行以下赌注：它会假设在不久的将来，线程可以得到这把锁。因此，虚拟机会让当前线
+                        程做几个空循环（这也是自旋的含义），在经过若干次循环后，如果可以得到锁，那么就顺利进入
+                        临界区，否则，才会真实的将线程在操作系统层面挂起。
+                2.4 锁消除：
+                        是一种更彻底的锁优化，虚拟机在JIT编译时，通过对运行上下文的扫描，去除不可能存在共享资源竞争
+                        的锁。通过锁消除，可以节省毫无意义的请求锁时间。之所以不存在竞争，程序员还要加锁，很可能在
+                        不合理的情况下使用了锁，比如使用了vector等
+
+            锁消除涉及的一项关键技术为逃逸分析。就是观察某一个变量是否会逃出某一个作用域。在本例中，变量v显然没有
+            逃出createStrings()函数之外，以此为基础，虚拟机可以大胆地将v内部的加锁操作去除。如果createString()返回
+            的不是String数组，而是v本身，那么认为变量v逃逸出了当前函数，也就是说v有可能被其它线程访问。此时，虚拟
+            机不能消除v中的锁操作。
+            逃逸分析必须在-server模式下运行，可以使用-XX:+DoEscapeAnalysis参数打开逃逸分析。
+
+        三：锁的最高境界 无锁：
+            乐天派认为出错是很小概率，而悲观派认为出错是一种常态。对于并发控制而言，锁是一种悲观的策略，假设每一次的
+            临界操作会产生冲突，因此都宁可牺牲性能让线程等待，因此说锁会阻塞线程执行。无锁是一种乐观策略，假设没有冲
+            突，无需等待，
+            使用一种叫 比较交换的技术（CAS Compare And Swap）来鉴定线程冲突，冲突之后就重试当前操作，直到没有冲突为止。
+
+           4.1 与众不同的并发策略： 比较交换（CAS）
+               比较交换使程序比锁看起来更加复杂，但由于非阻塞行，对死锁免疫，线程间的相互影响也小些，重要的是没有锁竞争
+                带来的系统开销，也没有线程间频繁调度带来的开销。性能优越。
+
+             CAS算法过程：它包含了三个参数 CAS(V,E,N).V 表示要更新的变量, E表示预期的值，N表示新值 。仅当V值等于E值，
+                才会将V值设为N值，如果不同，则说明已经有其他线程做了更新，则当前线程什么都不做。最后，CAS返回当前V的真实值
+                。CAS是抱着乐观的态度进行的，认为自己可以成功完成任务，多个线程使用CAS操作一个变量时，只有一个会胜出，并且
+                成功更新，其余会失败，失败线程不会被挂起，仅是被告知失败，允许再次尝试，也允许放弃操作。（简单地说，
+                CAS需要你额外给出一个期望值，认为这个变量应该是什么样子。如果不是想象的那样，说明已经被人更改了，需要再次重试）
+
+                注：使用 CAS 不会导致失败线程挂起，因此减少了线程间频繁调度带来的开销，同时使用无锁操作，减少了获取锁资源的消耗
+                是最高效的多线程并发
+
+            4.2 无锁的线程安全整数: AtomicInteger 案例：
+                /**
+                 * CAS 案例 AtomicInteger
+                 */
+                public class ThreadUtils {
+                   static AtomicInteger i=new AtomicInteger();
+
+                   public static class AddThread implements Runnable {
+                      public void run() {
+                         for (int k=0;k<10000;k++){
+                            i.incrementAndGet();
+                         }
+                      }
+                   }
+
+                   public static void main(String[] args) throws InterruptedException {
+                      Thread[] ts=new Thread[10];
+                      for (int k=0;k<10;k++){
+                         ts[k]=new Thread(new AddThread());
+                      }
+                      for (int k=0;k<10;k++){ts[k].start();}
+                      for (int k=0;k<10;k++){
+                         ts[k].join();//join是等待当前线程执行完之后，主线程才继续执行下去，其它线程和当前线程还是竞争关系
+                      }
+                      System.out.println(i);
+                   }
+                }
+            案例：CasOperate.java
+
+        分析incrementAndGet()
+            public final int incrementAndGet() {
+                for (;;) {
+                    int current = get();//3
+                    int next = current + 1;//4
+                    if (compareAndSet(current, next))//5
+                        return next;
+                }
+            }
+
+          4.3 无锁的对象引用：AtomicReference 
+              AtomicReference 和 AtomicInteger 非常类似，不同在于 AtomicInteger是对整数的封装，而
+               AtomicReference对应普通的对象引用，保证在修改对象引用时的线程安全性。原子操作逻辑上的不足：
+             线程判断被修改对象是否可以正确写入的条件是对象的当前值和期望值是否一致。但可能有小小的例外，
+               当获得对象当前数据后，在准备修改为新值前，对象的值被其它线程连续修改了两次，经过两次修改后，
+               对象的值又恢复为旧值，当前线程就无法正确判断这个对象是否被修改过。也就是ABA问题
+             对于ABA问题，解决方法是带有时间戳的对象引用：
+               AtomicStampedReference
+           
+               AtomicReference 无法解决问题是因为对象在修改过程中，丢失了状态，而AtomicStampedReference
+               不仅维护了对象指，还维护了一个时间戳（可以使任何一个整数来表示状态值），当
+               AtomicStampedReference对应的数值被修改后，除了更新数据本身外，还必须更新时间戳。因此，对象值
+               以及时间戳都必须满足期望值，写入成功，能防止不恰当的写入。
+
+        备注：
+            为了保证并发下数据一致，或者构造单例数据，需进行
+            双重检测：进行双重检测数据的唯一性，保证数据的一致性（一个系统同对象的数据只能有一份，否则就会
+                产生数据不一致问题）
+                代码：
+                private ApiInfoModel getApiInfoModelFromCache(String path) {
+                		ApiInfoModel apiInfoModel = apiInfoModelCacheMap.get(path);
+                		if(apiInfoModel == null){
+                			synchronized (ApiInfoModel.class){
+                				apiInfoModel = apiInfoModelCacheMap.get(path);
+                				if(apiInfoModel == null){
+                					// get by db
+                					apiInfoModel = getApiInfoFromDBByPath(path);
+                					// put apiInfoModelCacheMap
+                					apiInfoModelCacheMap.put(path,apiInfoModel);
+                				}
+                			}
+                		}
+                		return apiInfoModel;
+                	}
+
+
+
+第四部分：ThreadLocal
+    ThreadLocal是一个线程的局部变量。也就是说，只有当前线程可以访问。线程安全(跟线程绑定)
+          线程安全：除了控制资源访问外（线程安全），还可以通过增加资源来保证所有对象的线程安全。如：100人填写个
+          人信息表，一支笔就只能挨个写，那如果准备100支笔，可以各自为营。
+          因此：锁是第一种思路，ThreadLocal是第二种思路。
+          4.1 简单使用：案例：
+          ThreadLocal<SimpleDateFormat> sdfThreadLocal = new ThreadLocal<>();
+          sdfThreadLocal.set(new SimpleDateFormat("yyyy-MM-dd HH:mm:ss"));
+          sdfThreadLocal.get().parse("2015-03-29 19:29:"+i%60);
+
+    具体实现：
+         public void set(T value) {
+             Thread t = Thread.currentThread();
+             ThreadLocalMap map = getMap(t);
+             if (map != null)
+                 map.set(this, value);
+             else
+                 createMap(t, value);
+         }
+
+    在set时，首先获得当前线程对象，然后通过getMap()拿到线程的ThreadLocalMap,并将值设入ThreadLocalMap中
+         ，（可以把ThreadLocalMap理解为一个Map,虽然不是，但可以简单的理解成HashMap）,它是定义在Thread内部的
+         成员，因此只有当前线程访问到。
+         ThreadLocal.ThreadLocalMap threadLocals = null;
+         设置到ThreadLocal中的数据，真是写入threadLocals这个map，key为ThreadLocal当前对象，value就是我们需
+         要的值。threadLocals本身保存了当前线程的所有局部变量，也就是ThreadLocal变量集合。
+            在get()时，将map数据拿出来：
+
+            public T get() {
+                Thread t = Thread.currentThread();
+                ThreadLocalMap map = getMap(t);
+                if (map != null) {
+                    ThreadLocalMap.Entry e = map.getEntry(this);
+                    if (e != null)
+                        return (T)e.value;
+                }
+                return setInitialValue();
+            }
+
+            只要线程不退出，对象的引用一直存在，线程退出时，Thread类会进行清理工作，包括ThreadLocalMap
+
+            private void exit() {
+                if (group != null) {
+                    group.threadTerminated(this);
+                    group = null;
+                }
+                /* Aggressively null out all reference fields: see bug 4006245 */
+                target = null;
+                /* Speed the release of some of these resources */
+                /* 加速资源清理 */
+                threadLocals = null;
+                inheritableThreadLocals = null;
+                inheritedAccessControlContext = null;
+                blocker = null;
+                uncaughtExceptionHandler = null;
+            }
+
+            因此，如果我们使用线程池，意味着当前线程未必会退出（比如固定大小的线程池，线程总是存在），如果这样，
+                将一些大大的对象设置到ThreadLocal中（实际保存在线程持有的threadLocals Map内），可能会使系统出
+                现内存泄露的可能（意思是：设置了对象到ThreadLocal中，但是不清理它，使用了几次后，这个对象不再
+                有用了，但是却无法被回收）
+               如果你希望及时回收对象，最好使用ThreadLocal.remove()方法将变量移除，如关闭数据库连接一样。也
+                允许像释放普通变量一样释放ThreadLocal,比如：为了加速垃圾回收，会写出 obj==null之类的代码，这么
+                做，obj所指向的对象会更容易地被垃圾回收器发现，加速回收。
+            一般来说：
+                使用ThreadLocal会比锁的性能要高，因为没有资源的竞争，但是会带来一些其他的问题（同上）。因此无锁
+                就出现了。
+
+
+第五部分：
+    5.1：生产者-消费者模式
+           概念：
+                在生产者-消费者模式中，通常有两类线程，即若干个生产者线程和若干个消费者线程。生产者线程负
+                责提交用户请求，消费者线程负责处理生产者提交的任务。生产者和消费者之间则通过共享内存缓冲区进行
+                通信。
+           注意：该模式中的内存缓冲区的主要功能是数据在多线程间的共享，此外，通过该缓冲区，可以缓解生产者和消
+                费者间的性能差。共享内存缓冲区实现了解耦。
+
+            5.1.1：通过 BlockingQueue 充当共享内存缓冲区来维护任务或者数据队列 。来实现一个基于生产者-消费者模式
+                的求整数平方的并行程序。
+
+            5.1.1.1 生产者：
+                /**
+                 * 生产者
+                 */
+                public class Producer implements Runnable {
+                    private volatile boolean isRunning = true;
+                    private BlockingQueue<PCData> queue;         //内存缓冲区,用于消息共享
+                    private static AtomicInteger count = new AtomicInteger();//总数，原子操作
+                    private static final int SLEEPTIME = 1000;
+
+
+                    public Producer(BlockingQueue<PCData> queue){
+                        this.queue = queue;
+                    }
+
+
+                    public void run() {
+                        PCData data = null;
+                        Random r = new Random();
+                        System.out.println("start producer id="+Thread.currentThread().getId());
+
+                        //线程正在运行
+                        while (isRunning){
+                            try {
+                                Thread.sleep(r.nextInt(SLEEPTIME));
+                                data = new PCData(count.incrementAndGet());//构造任务数据
+                                System.out.println(data+" is put into queue");
+                                if (!queue.offer(data,2, TimeUnit.SECONDS)){ //提交数据到缓冲区
+                                    System.out.println("fail to put data: "+data);
+                                }
+                            } catch (InterruptedException e) {
+                                e.printStackTrace();
+                                Thread.currentThread().interrupt();//线程终止
+                            }
+                        }
+                    }
+
+                    public void stop(){
+                        isRunning = false;
+                    }
+
+                }
+            5.1.1.1.2 消费者：
+                public class Consumer implements Runnable {
+                    private BlockingQueue<PCData> queue;        //缓冲区
+                    private static final int SLEEPTIME = 1000;
+
+                    public Consumer(BlockingQueue<PCData> queue){
+                        this.queue = queue;
+                    }
+
+                    public void run() {
+                        System.out.println("start Consumer id="+Thread.currentThread().getId());
+                        Random r = new Random();
+                        while (true){
+                            try {
+                                PCData data = queue.take();
+                                if (null != data){
+                                    int re = data.getData() * data.getData(); //计算平方
+                                    System.out.println(MessageFormat.format("{0}*{1}={2}",data.getData(),data.getData(),re));
+                                    Thread.sleep(r.nextInt(SLEEPTIME));
+                                }
+                            } catch (InterruptedException e) {
+                                e.printStackTrace();
+                                Thread.currentThread().interrupt();//被中断了就直接结束
+                            }
+                        }
+                    }
+                }
+
+            5.1.1.1.3 任务；
+                /**
+                 * 任务(数据结构)
+                 * 作为生产者和消费者之间的共享数据模型
+                 */
+                public class PCData {
+                    private final int intData;   //数据
+
+                    public PCData(int intData) {
+                        this.intData = intData;
+                    }
+
+                    public PCData(String d){
+                        intData = Integer.parseInt(d);
+                    }
+
+                    public int getData(){
+                        return intData;
+                    }
+
+                    public String toString(){
+                        return "data:"+intData;
+                    }
+                }
+            5.1.1.1.4 执行
+                public static void main(String[] args) throws InterruptedException {
+                   BlockingQueue<PCData> queue = new LinkedBlockingDeque<>(10);
+                   Producer producer1 = new Producer(queue);     //建立生产者
+                   Producer producer2 = new Producer(queue);
+                   Producer producer3 = new Producer(queue);
+
+                   Consumer consumer1 = new Consumer(queue);    //建立消费者
+                   Consumer consumer2 = new Consumer(queue);
+                   Consumer consumer3 = new Consumer(queue);
+
+                   ExecutorService service = Executors.newCachedThreadPool(); //建立线程池
+                   service.execute(producer1);  //运行生产者，一直生成int对象数据
+                   service.execute(producer2);
+                   service.execute(producer3);
+
+                   service.execute(consumer1);
+                   service.execute(consumer2);
+                   service.execute(consumer3);
+                   Thread.sleep(5*1000);//主线程休眠，其他服务线程继续执行，执行时间则为sleep时间
+                   System.out.println("after sleep");
+                   producer1.stop();             //停止生产者
+                   producer2.stop();
+                   producer3.stop();
+                   System.out.println("all stop");
+                   Thread.sleep(3000);
+                   service.shutdown();
+                }
+
+    5.2 用Disruptor实现生产者-消费者案例：（暂时忽略，有必要再学习） 详见 Hmily 项目
+
+    5.3 CPU Cache的优化 ：解决伪共享问题
+        原理：为了提高CPU速度,CPU有一个高速缓存Cache.在高速缓存中，读写数据的最小单位为：缓存行（Cache Line）
+        ,它是从主存（Memory）复制到缓存（Cache）的最小单位，一般为32字节到128字节。如果两个变量存放在一个缓
+        存行中，在多线程访问中，可能会相互影响彼此的性能（内存地址冲突导致失效）。假如X和Y在同一个缓存行，运
+        行在CPU1上的线程更新了X，那么CPU2上的缓存行就会失效，同一行的Y即使没有修改也会变成无效，导致Cache
+        无法命中。如果在CPU2上的线程更新了Y,则导致CPU1上的缓存行又失效（此时，同一行的X又变得无法访问），如
+        果CPU经常不能命中缓存，系统的吞吐量就会急剧下降。
+
+        图示：
+            --------x----------y-----  处在同一缓存行上，一个更新，导致整行都失效。也就是说该行上面的所有的数据都会失效
+                    |          |
+                    |          |
+                    Cpu1      Cpu2
+
+        解决方法：
+            在X变量的前后空间都先占据一定的位置（把它叫做padding，用来填充用的）。当内存被读入缓存中时，
+            这个缓存行中，只有X一个变量实际是有效的，因此就不会发生多个线程同时修改缓存行中不同变量而导致变量全体失效的情况
+            也就是把缓存单个存放一个缓存行，防止被其他数据影响
+
+            /**
+             * 伪共享问题
+             * 也就是多个变量存在一个缓存行中，在多线程访问中，对于更新操作时，只要更新一个变量，会导致整个缓存行失效
+             * 因此会影响彼此性能
+             */
+            public final class ThreadUtils implements Runnable{
+               public final static int NUM_THREADS = 2;
+               public final static long ITERATIONS = 500L * 1000L *1000L;
+               private final int arrayIndex;
+
+               private static VolatileLong[] longs = new VolatileLong[NUM_THREADS];
+               static {
+                  for (int i=0;i<longs.length;i++){
+                     longs[i] = new VolatileLong();
+                  }
+               }
+
+               public ThreadUtils(final int arrayIndex){
+                  this.arrayIndex = arrayIndex;
+               }
+
+               public static void main(String[] args) throws InterruptedException {
+                  final long start = System.currentTimeMillis();
+                  runTest();
+                  System.out.println("duration =" + (System.currentTimeMillis()-start));
+               }
+
+               private static void runTest() throws InterruptedException {
+                  Thread[] threads = new Thread[NUM_THREADS];
+
+                  for (int i=0;i<threads.length;i++){
+                     threads[i] = new Thread(new ThreadUtils(i));
+                  }
+
+                  for (Thread t : threads){
+                     t.start();
+                  }
+
+                  for (Thread t : threads){
+                     t.join();
+                  }
+               }
+
+               public void run(){
+                  long i = ITERATIONS +1;
+                  while (0 != --i){
+                     longs[arrayIndex].value = i;
+                  }
+               }
+
+
+               public final static class VolatileLong{
+                  public volatile long value = 0L;
+                  public long p1,p2,p3,p4,p5,p6,p7;//comment out
+
+               }
+            }
+
+
+    5.4 Future模式的简单实现：   
+        在这个实现中，核心接口Data,就是客户端希望获取的数据。在Future模式中，有两个重要实现：
+        RealData和FutureData.
+        RealData是真实数据，也就是最终需要获得的。FutureData是用来提取RealData的一个“订单”。FutureData可以立即返回得到。
+
+        Future 模式实现代码：
+            /**
+             * 真实需要数据
+             */
+            public class RealData implements Callable<String> {
+                private String para;
+                public RealData(String para){
+                    this.para = para;
+                }
+
+                public String call() throws Exception {
+                    StringBuffer sb = new StringBuffer();
+                    for (int i=0;i<10;i++){
+                        sb.append(para);
+                        try {
+                            Thread.sleep(100);
+                        }catch (InterruptedException e){
+                            e.printStackTrace();
+                        }
+                    }
+                    return sb.toString();
+                }
+            }
+
+        执行
+            /**
+             * Future 模式
+             * 核心思想：异步调用
+             */
+            public class ThreadUtils {
+
+                public static void main(String[] args){
+                    //构造FutureTask
+                    FutureTask<String> future = new FutureTask<>(new RealData("a"));
+
+            BlockingQueue blockingQueue = new ArrayBlockingQueue(20);
+                      ExecutorService service = new ThreadPoolExecutor(1,1,0, TimeUnit.SECONDS,blockingQueue);
+                    //ExecutorService service = Executors.newFixedThreadPool(1);
+                    //执行FutureTask，相当于发送请求
+                    //在这里开启线程进行RealData的call()执行
+                    service.submit(future);
+
+                    System.out.println("请求完毕");
+                    try {
+                        Thread.sleep(10000);
+                    } catch (InterruptedException e) {
+                        e.printStackTrace();
+                    }
+                    //取得call()方法的返回值,如果此时call()方法没有执行完成，依然会等待,还有等待超时方法（4,TimeUnit.SECOND）
+                    try {
+                        System.out.println("数据="+future.get());
+                    } catch (InterruptedException e) {
+                        e.printStackTrace();
+                    } catch (ExecutionException e) {
+                        e.printStackTrace();
+                    }
+                    service.shutdown();
+                }
+
+            }
+        总结： Callable 接口只有一个方法 call(),它会返回需要构造的实际数据。这个Callable 接口也是这个
+        Future框架和应用程序之间的重要接口。如果我们要实现自己的业务系统，通常需要实现自己的 Callable
+        对象（如上 RealData）,通常会使用 Callable 实例来构造 一个FutureTask 实例，并将它提交给线程池
+        （因为需要返回的数据，故使用FutureTask,否则使用FutureAction）.上述main方法，构造 FutureTask时，
+        使用Callable 接口，告诉FutureTask我们需要的数据应该如何产生。显然作为一个简单的任务提交，这里
+        必然是立即返回的，程序不会阻塞，然后通过 Future.get()得到实际的数据。
+
+       实际上 普通的  Runnable 任务使用 submit()也可以 返回Future对象，并获取返回值。但是callable实现了
+       Runnable 接口 同时实现了 Future 接口，因此可以看做是 Runnable任务的一个增强
+
+
+
+优雅关闭线程池：详情请见 ExecutorUtil.java
+
+
+
+年终总结：
+    线程正常情况下使用 Thread.sleep() 是不会出现 interrupted 异常。只有 调用了 Thread.interrupted()
+    方法，才会出现 interrupted 异常。因此实际使用中要让线程休眠，在捕获中断异常时，直接跳出线程即可

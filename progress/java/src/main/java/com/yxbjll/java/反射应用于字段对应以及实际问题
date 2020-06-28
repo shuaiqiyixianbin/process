@@ -1,0 +1,276 @@
+关于反射应用于hibernate字段对应以及实际问题中的理解
+1.https://www.cnblogs.com/cs-lcy/p/7397955.html
+
+2.https://blog.csdn.net/l19921009/article/details/8214542 动态
+
+
+
+3.项目前期知识储备
+
+public static void main(String[] args){
+    Class<?> clazz = QuestionAnswer.class;
+    Field[] fields = clazz.getDeclaredFields();
+    try {
+        Object object = clazz.newInstance();
+        Object objectLong = 1;
+        int num=0;
+        for(int i=0;i<fields.length;i++){
+            System.out.println(fields[i].getName()+"+"+fields[i].getType());
+            if(fields[i].getType().toString().toLowerCase().contains("string".toLowerCase())){
+                fields[i].setAccessible(true);
+                fields[i].set(object,"张飞------"+(num++));
+                System.out.println(fields[i].get(object));
+            }
+            if(fields[i].getType().toString().toLowerCase().contains("long".toLowerCase())){
+                fields[i].setAccessible(true);
+                fields[i].set(object,Long.valueOf(objectLong.toString()));
+                System.out.println(fields[i].get(object));
+            }
+        }
+    } catch (InstantiationException e) {
+        e.printStackTrace();
+    } catch (IllegalAccessException e) {
+        e.printStackTrace();
+    }
+}
+
+
+//实际成果
+
+public static void main(String[] args){
+    Object[] array = getShamArray();
+    List<Object[]> objects = new ArrayList<Object[]>();
+    objects.add(array);
+    QuestionAnswer questionAnswer = (QuestionAnswer) getReflectClass(QuestionAnswer.class,objects);
+    System.out.println(questionAnswer.toString());
+}
+
+
+//反射 暂时只考虑String、Long、int、long
+public static Object getReflectClass(Class<?> clazz,List<Object[]> objectList){
+    Field[] fields = clazz.getDeclaredFields();
+    Object object = null;
+    try {
+        object = clazz.newInstance();
+        if(objectList==null || objectList.size()==0) return null;
+        for(int objectLength=0;objectLength<objectList.size();objectLength++){
+            for(int fieldLength=0;fieldLength<fields.length;fieldLength++){
+                fields[fieldLength].setAccessible(true);//设置允许访问
+                if(fields[fieldLength].getType().toString().toLowerCase().contains("string".toLowerCase())){
+                    fields[fieldLength].set(object,convertToString(objectList.get(objectLength)[fieldLength]));
+                }
+                else if(fields[fieldLength].getType().toString().toLowerCase().contains("Long".toLowerCase())){
+                    fields[fieldLength].set(object,convertToLong(objectList.get(objectLength)[fieldLength]));
+                }
+                else if(fields[fieldLength].getType().toString().toLowerCase().contains("long".toLowerCase())){
+                    fields[fieldLength].set(object,convertTolong(objectList.get(objectLength)[fieldLength]));
+                }
+                else{
+                    fields[fieldLength].set(object,convertToInt(objectList.get(objectLength)[fieldLength]));
+                }
+            }
+        }
+    } catch (InstantiationException e) {
+        e.printStackTrace();
+    } catch (IllegalAccessException e) {
+        e.printStackTrace();
+    }
+    return object;
+}
+
+private static Object[] getShamArray(){
+    Object[] object = new Object[9];
+    object[0] = 1L;
+    object[1] = "yxb reflect";//String
+    object[2] = "ylp cp";//
+    object[3] = "java";//Long
+    object[4] = "多久之前创建";//long
+    object[5] = "对应英文国际化";//long
+    object[6] = 9L;//long
+    object[7] = 9L;//long
+    object[8] = 9L;//long
+    return object;
+}
+
+//to string
+private static String convertToString(Object object){
+    String str = object.toString();
+    return str;
+}
+
+//to Long
+private static Long convertToLong(Object object){
+    Long lg = Long.getLong(object.toString());
+    return lg;
+}
+
+//to long
+private static long convertTolong(Object object){
+    long lg = Long.parseLong(object.toString());
+    return lg;
+}
+
+//to int
+private static int convertToInt(Object object){
+    int inter = Integer.parseInt(object.toString());
+    return inter;
+}
+
+
+//项目中实际使用的时候不能解决传入list的局限，只能解析单个object[]数组，代码如下，后续待改进
+
+/**
+ * 测试使用反射来映射hibernateList<Object[]>数组与自己需要的包装类
+ */
+public List<CourseWrapper> reflectCourseWrapperAndObject(List<Object[]> objectArray){
+    List<CourseWrapper> courseWrapperList = new ArrayList<CourseWrapper>();
+    for(int i=0;i<objectArray.size();i++){
+        CourseWrapper courseWrapper = (CourseWrapper) getReflectWrapperClass(CourseWrapper.class,objectArray.get(i));
+        courseWrapperList.add(courseWrapper);
+    }
+    return courseWrapperList;
+}
+
+//反射 暂时只考虑String、Long、int、long
+private Object getReflectWrapperClass(Class<?> clazz,Object[] objectArray){
+    Field[] fields = clazz.getDeclaredFields();
+    Object object = null;
+    try {
+        object = clazz.newInstance();
+            for(int fieldLength=0;fieldLength<fields.length;fieldLength++){
+                fields[fieldLength].setAccessible(true);//设置允许访问
+                if(objectArray[fieldLength] ==null){
+                    fields[fieldLength].set(object,null);
+                    continue;
+                }
+                if(fields[fieldLength].getType().toString().toLowerCase().contains("string".toLowerCase())){
+                    fields[fieldLength].set(object,convertToString(objectArray[fieldLength],fields[fieldLength].getName()));
+                }
+                else if(fields[fieldLength].getType().toString().toLowerCase().contains("long".toLowerCase())){
+                    fields[fieldLength].set(object,convertToLong(objectArray[fieldLength]));
+                }
+                else if(fields[fieldLength].getType().toString().toLowerCase().contains("int".toLowerCase())){
+                    fields[fieldLength].set(object,convertToInt(objectArray[fieldLength]));
+                }
+                else if(fields[fieldLength].getType().toString().toLowerCase().contains("integer".toLowerCase())){
+                    fields[fieldLength].set(object,convertToInteger(objectArray[fieldLength]));
+                }
+            }
+    } catch (InstantiationException e) {
+        e.printStackTrace();
+    } catch (IllegalAccessException e) {
+        e.printStackTrace();
+    }
+    return object;
+}
+
+
+/****
+/***
+/**
+/*
+*
+下面是改进过后的泛型，Class<T> 代表某种类型的具体类型，如Class<T> 中 Class<QuestionAnswer> 代表QuestionAnswer类型的类 以及Class<Date> 都是class
+
+//测试返回class 类型，无需进行强制转换
+public static <T> List<T> testReturnNoConvert(Class<T> clazz,List<Object[]> objectList){
+    Field[] fields = clazz.getDeclaredFields();
+    List<T> typeList = new ArrayList<T>();
+    T classConvert = null;
+    try {
+        if(objectList==null || objectList.size()==0) return null;
+        for(int objectLength=0;objectLength<objectList.size();objectLength++){
+            classConvert = clazz.newInstance();
+            for(int fieldLength=0;fieldLength<fields.length;fieldLength++){
+                fields[fieldLength].setAccessible(true);//设置允许访问
+                if(fields[fieldLength].getType().toString().toLowerCase().contains("string".toLowerCase())){
+                    fields[fieldLength].set(classConvert,convertToString(objectList.get(objectLength)[fieldLength]));
+                }
+                else if(fields[fieldLength].getType().toString().toLowerCase().contains("long".toLowerCase())){
+                    fields[fieldLength].set(classConvert,convertToLong(objectList.get(objectLength)[fieldLength]));
+                }
+                else{
+                    fields[fieldLength].set(classConvert,convertToInt(objectList.get(objectLength)[fieldLength]));
+                }
+            }
+            typeList.add(classConvert);
+        }
+    } catch (InstantiationException e) {
+        e.printStackTrace();
+    } catch (IllegalAccessException e) {
+        e.printStackTrace();
+    }
+    return typeList;
+}
+
+
+//调用
+public static void main(String[] args){
+    Object[] array = getShamArray();
+    List<Object[]> objects = new ArrayList<Object[]>();
+    objects.add(array);
+    objects.add(getShamArray2());
+    List<QuestionAnswer> questionAnswerList = new ArrayList<QuestionAnswer>();
+    questionAnswerList = testReturnNoConvert(QuestionAnswer.class,objects);
+    for(QuestionAnswer questionAnswer : questionAnswerList){
+        System.out.println(questionAnswer.toString());
+    }
+}
+
+//为什么用 泛型 T 而不用 通配符 ？ 主要此处代表的是，无论穿入什么类型，就会返回什么类型，各种类型都适用，因此用泛型，
+通配符用来支持灵活的子类化，而泛型用于表示方法的一个或多个参数之间的类型依赖关系，或者方法返回值与参数之间的类型依赖关系
+现在传入Class 类型，需要返回该类型的参数，存在依赖关系，因此要用泛型，而不是通配符进行一个全景匹配，为了灵活子类化
+二：泛型在字段field的使用
+public static void main(String[] args){
+   TargetDO target = new TargetDO();
+   target.setCreatedBy(2+"name");
+   TargetDO t = getUserByName(target,"createdBy","createdList");
+   System.out.println(t.toString());
+}
+
+
+//根据真实姓名模糊匹配
+public static <T> T getUserByName (T t, String source,String target){
+   //List<UserDO> userDOList =  orgManager.handleHttpReturnNameList( headMap);
+   List<UserDO> userDOList = getUserList();
+   try {
+      List list = new ArrayList();
+      Field field = t.getClass().getDeclaredField(source);
+      field.setAccessible(true);
+      Field targetField = t.getClass().getDeclaredField(target);
+      targetField.setAccessible(true);
+      if (field !=null){
+         for (UserDO user : userDOList){
+            if (user.getName().contains(field.get(t).toString())){
+               list.add(user.getUsername());
+            }
+         }
+         targetField.setAccessible(true);
+         if (targetField.getType().toString().toLowerCase().contains("list".toLowerCase())){
+            targetField.set(t,list);
+         }else {
+            if (list != null && list.size()>0){
+               targetField.set(t,list.get(0));
+            }
+         }
+      }
+   } catch (NoSuchFieldException e) {
+      e.printStackTrace();
+   } catch (IllegalAccessException e) {
+      e.printStackTrace();
+   }
+   return t;
+}
+
+
+private static List<UserDO> getUserList(){
+   List<UserDO> userList = new ArrayList<>();
+   UserDO user;
+   for(int i=0;i<5;i++){
+      user = new UserDO();
+      user.setName(i+"name");
+      user.setUsername(i+"username");
+      userList.add(user);
+   }
+   return userList;
+}
